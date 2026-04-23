@@ -39,3 +39,14 @@
 
 # debug information files
 *.dwo
+
+# Platformio build files
+.pio
+# CMake build files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# vscode settings
+.vscode/
