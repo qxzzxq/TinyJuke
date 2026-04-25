@@ -50,3 +50,6 @@ Makefile
 
 # vscode settings
 .vscode/
+
+# mac os 
+.DS_Store
