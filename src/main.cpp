@@ -84,6 +84,91 @@ void setup() {
     Serial.println("Waiting for an ISO14443A card...");
 }
 
+
+
+static const uint8_t KNOWN_KEYS[][6] = {
+    {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF},  // factory default
+    {0xD3, 0xF7, 0xD3, 0xF7, 0xD3, 0xF7},  // NDEF data sectors
+    {0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5},  // MAD key (sector 0 after NDEF format)
+    {0x4D, 0x3A, 0x99, 0xC3, 0x51, 0xDD},  // commonly published key
+    {0x1A, 0x98, 0x2C, 0x7E, 0x45, 0x9A},  // commonly published key
+    {0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5},  // MAD KEYB variant
+};
+
+// create a list of known key names for easier debugging
+static const char *KNOWN_KEY_NAMES[] = {
+    "Factory default",
+    "NDEF data sectors",
+    "MAD key (sector 0 after NDEF format)",
+    "Commonly published key #1",
+    "Commonly published key #2",
+    "MAD KEYB variant",
+};
+
+static const uint8_t NUM_KEYS = sizeof(KNOWN_KEYS) / 6;
+
+static void dumpCard() {
+    Serial.println();
+    Serial.println("=== MIFARE Classic 1K full dump ===");
+
+    for (uint8_t sector = 0; sector < 16; sector++) {
+        uint8_t trailerBlock = sector * 4 + 3;
+        int8_t keyIdx = -1;
+
+        // A failed auth deselects the card on the PN532, so re-select before each key try.
+        for (uint8_t k = 0; k < NUM_KEYS; k++) {
+            uint8_t u[7];
+            uint8_t uLen = 0;
+            if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 200)) continue;
+            if (nfc.mifareclassic_AuthenticateBlock(u, uLen, trailerBlock, 0,
+                                                   (uint8_t *)KNOWN_KEYS[k])) {
+                keyIdx = k;
+                break;
+            }
+        }
+
+        Serial.print("Sector ");
+        if (sector < 10) Serial.print(' ');
+        Serial.print(sector);
+        if (keyIdx < 0) {
+            Serial.println("  [all known keys failed]");
+            continue;
+        }
+        Serial.print("  KEYA=");
+        printHex(KNOWN_KEYS[keyIdx], 6);
+        Serial.print("  (");
+        Serial.print(KNOWN_KEY_NAMES[keyIdx]);
+        Serial.println(")");
+
+        for (uint8_t b = 0; b < 4; b++) {
+            uint8_t block = sector * 4 + b;
+            uint8_t data[16];
+            if (!nfc.mifareclassic_ReadDataBlock(block, data)) {
+                Serial.print("  blk ");
+                if (block < 10) Serial.print(' ');
+                Serial.print(block);
+                Serial.println(" | read failed");
+                continue;
+            }
+            Serial.print("  blk ");
+            if (block < 10) Serial.print(' ');
+            Serial.print(block);
+            Serial.print(" | ");
+            printHex(data, 16);
+            Serial.print(" | ");
+            for (uint8_t i = 0; i < 16; i++) {
+                char c = (data[i] >= 0x20 && data[i] < 0x7F) ? (char)data[i] : '.';
+                Serial.print(c);
+            }
+            if (b == 3) Serial.print("  <- trailer");
+            else if (sector == 0 && b == 0) Serial.print("  <- manufacturer");
+            Serial.println();
+        }
+    }
+    Serial.println("=== End dump ===");
+    Serial.println();
+}
+
 void loop() {
     uint8_t uid[7] = {0};
     uint8_t uidLength = 0;
@@ -95,6 +180,14 @@ void loop() {
         Serial.print(" bytes): ");
         printHex(uid, uidLength);
         Serial.println();
-        delay(500);
+
+        dumpCard();
+
+        // Wait for removal so we don't re-dump in a tight loop while the card sits on the reader.
+        Serial.println("Remove card to dump the next one...");
+        uint8_t u[7];
+        uint8_t uLen;
+        while (nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 200)) delay(100);
+        Serial.println("Card removed.");
     }
 }
