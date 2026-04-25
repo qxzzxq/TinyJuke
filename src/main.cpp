@@ -12,6 +12,8 @@
 #include <Arduino.h>
 #include <PN532_HSU.h>
 #include <PN532.h>
+#include <mbedtls/md.h>
+#include <string.h>
 
 #define PN532_TX 33  // ESP32 receives on this pin
 #define PN532_RX 32  // ESP32 transmits on this pin
@@ -169,6 +171,131 @@ static void dumpCard() {
     Serial.println();
 }
 
+static void hmacSha256(const uint8_t *key, size_t keyLen,
+                       const uint8_t *data, size_t dataLen,
+                       uint8_t out[32]) {
+    mbedtls_md_context_t ctx;
+    mbedtls_md_init(&ctx);
+    const mbedtls_md_info_t *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    // Second arg = 1 selects HMAC mode rather than plain hash mode.
+    mbedtls_md_setup(&ctx, info, 1);
+    mbedtls_md_hmac_starts(&ctx, key, keyLen);
+    mbedtls_md_hmac_update(&ctx, data, dataLen);
+    mbedtls_md_hmac_finish(&ctx, out);
+    mbedtls_md_free(&ctx);
+}
+
+// HKDF-SHA256 reproducing the Bambu RFID-Tag-Guide kdf(): salt = master constant,
+// IKM = card UID, info = "RFID-A\0", output = 16 keys * 6 bytes = 96 bytes total.
+static void deriveBambuKeys(const uint8_t *uid, uint8_t uidLen, uint8_t keys[16][6]) {
+    static const uint8_t SALT[16] = {
+        0x9a, 0x75, 0x9c, 0xf2, 0xc4, 0xf7, 0xca, 0xff,
+        0x22, 0x2c, 0xb9, 0x76, 0x9b, 0x41, 0xbc, 0x96
+    };
+    static const uint8_t INFO[7] = { 'R', 'F', 'I', 'D', '-', 'A', 0x00 };
+
+    // HKDF-Extract: PRK = HMAC-SHA256(salt, IKM)
+    uint8_t prk[32];
+    hmacSha256(SALT, sizeof(SALT), uid, uidLen, prk);
+
+    // HKDF-Expand: T(i) = HMAC-SHA256(PRK, T(i-1) || info || i), 3 rounds give 96 bytes.
+    uint8_t okm[96];
+    uint8_t prev[32];
+    size_t prevLen = 0;
+    for (uint8_t i = 1; i <= 3; i++) {
+        uint8_t buf[32 + sizeof(INFO) + 1];
+        size_t off = 0;
+        memcpy(buf + off, prev, prevLen); off += prevLen;
+        memcpy(buf + off, INFO, sizeof(INFO)); off += sizeof(INFO);
+        buf[off++] = i;
+
+        uint8_t t[32];
+        hmacSha256(prk, sizeof(prk), buf, off, t);
+        memcpy(okm + (i - 1) * 32, t, 32);
+        memcpy(prev, t, 32);
+        prevLen = 32;
+    }
+
+    for (uint8_t k = 0; k < 16; k++) {
+        memcpy(keys[k], okm + k * 6, 6);
+    }
+}
+
+static void dumpBambuCard(const uint8_t *uid, uint8_t uidLen) {
+    if (uidLen != 4) {
+        Serial.println("Bambu tags use 4-byte UIDs; got a different length, skipping.");
+        return;
+    }
+
+    uint8_t keys[16][6];
+    deriveBambuKeys(uid, uidLen, keys);
+
+    Serial.println();
+    Serial.println("=== Bambu filament tag dump (HKDF-derived keys) ===");
+    Serial.println("Derived per-sector KEYA values:");
+    for (uint8_t s = 0; s < 16; s++) {
+        Serial.print("  sector ");
+        if (s < 10) Serial.print(' ');
+        Serial.print(s);
+        Serial.print(" KEYA = ");
+        printHex(keys[s], 6);
+        Serial.println();
+    }
+    Serial.println();
+
+    for (uint8_t sector = 0; sector < 16; sector++) {
+        uint8_t trailerBlock = sector * 4 + 3;
+
+        // Re-select the card before each sector to keep state predictable across the dump.
+        uint8_t u[7];
+        uint8_t uLen = 0;
+        if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 200)) {
+            Serial.print("Sector ");
+            Serial.print(sector);
+            Serial.println(": card lost, aborting.");
+            return;
+        }
+
+        bool authed = nfc.mifareclassic_AuthenticateBlock(u, uLen, trailerBlock, 0, keys[sector]);
+
+        Serial.print("Sector ");
+        if (sector < 10) Serial.print(' ');
+        Serial.print(sector);
+        if (!authed) {
+            Serial.println("  [auth FAILED with derived key]");
+            continue;
+        }
+        Serial.println();
+
+        for (uint8_t b = 0; b < 4; b++) {
+            uint8_t block = sector * 4 + b;
+            uint8_t data[16];
+            if (!nfc.mifareclassic_ReadDataBlock(block, data)) {
+                Serial.print("  blk ");
+                if (block < 10) Serial.print(' ');
+                Serial.print(block);
+                Serial.println(" | read failed");
+                continue;
+            }
+            Serial.print("  blk ");
+            if (block < 10) Serial.print(' ');
+            Serial.print(block);
+            Serial.print(" | ");
+            printHex(data, 16);
+            Serial.print(" | ");
+            for (uint8_t i = 0; i < 16; i++) {
+                char c = (data[i] >= 0x20 && data[i] < 0x7F) ? (char)data[i] : '.';
+                Serial.print(c);
+            }
+            if (b == 3) Serial.print("  <- trailer");
+            else if (sector == 0 && b == 0) Serial.print("  <- manufacturer");
+            Serial.println();
+        }
+    }
+    Serial.println("=== End dump ===");
+    Serial.println();
+}
+
 void loop() {
     uint8_t uid[7] = {0};
     uint8_t uidLength = 0;
@@ -181,7 +308,7 @@ void loop() {
         printHex(uid, uidLength);
         Serial.println();
 
-        dumpCard();
+        dumpBambuCard(uid, uidLength);
 
         // Wait for removal so we don't re-dump in a tight loop while the card sits on the reader.
         Serial.println("Remove card to dump the next one...");
