@@ -1,23 +1,78 @@
-// PN532 HSU demo for Lolin D32 Pro
+// ESP Jukebox — NFC tag reader + TFT display demo
 //
-// Wiring (remember UART must cross):
-//   PN532 SDA (acts as RX) <- ESP32 TX  (GPIO 33)
-//   PN532 SCL (acts as TX) -> ESP32 RX  (GPIO 32)
-//   PN532 VCC              <-  3V3
-//   PN532 GND              <-  GND
+// Displays scanned NFC tag UIDs on a 1.53" round TFT (ST77916, 360x360, QSPI).
 //
-// Elechouse PN532 DIP switches: BOTH OFF for HSU mode.
-// GPIO16/17 are reserved for PSRAM on the D32 Pro, hence using 32/33.
+// Wiring (UART must cross):
+//   PN532 TX  -> ESP32 RX  (GPIO 33)
+//   PN532 RX  <- ESP32 TX  (GPIO 32)
+//   PN532 VCC              <- 3V3
+//   PN532 GND              <- GND
 
 #include <Arduino.h>
 #include <PN532_HSU.h>
 #include <PN532.h>
 
-#define PN532_TX 33  // ESP32 receives on this pin
-#define PN532_RX 32  // ESP32 transmits on this pin
+// QSPI display uses VSPI (SPI3) — must be defined before the GFX include.
+#define ESP32QSPI_SPI_HOST SPI3_HOST
+#include <Arduino_GFX_Library.h>
+
+// --- PN532 (HSU / UART) ---
+#define PN532_TX 33  // ESP32 RX (receives from PN532)
+#define PN532_RX 32  // ESP32 TX (transmits to PN532)
 
 PN532_HSU pn532hsu(Serial2);
 PN532 nfc(pn532hsu);
+
+// --- TFT display (QSPI) ---
+// The D32 Pro variant header pre-defines conflicting TFT pin macros.
+#ifdef TFT_CS
+#undef TFT_CS
+#endif
+#ifdef TFT_DC
+#undef TFT_DC
+#endif
+#ifdef TFT_RST
+#undef TFT_RST
+#endif
+
+// QSPI bus: CS, SCK, IO0/MOSI, IO1/MISO, IO2/WP, IO3/HD
+#define TFT_CS   5
+#define TFT_SCK 18
+#define TFT_IO0 23
+#define TFT_IO1 19
+#define TFT_IO2 21
+#define TFT_IO3 22
+#define TFT_RST 14
+#define TFT_BL  13
+
+Arduino_ESP32QSPI bus(TFT_CS, TFT_SCK, TFT_IO0, TFT_IO1, TFT_IO2, TFT_IO3);
+Arduino_ST77916 gfx(&bus, TFT_RST, 0 /* rotation */, false /* ips */,
+                    360, 360,
+                    0, 0, 0, 0,
+                    st77916_150_init_operations, sizeof(st77916_150_init_operations));
+
+// --- Helpers ---
+
+static const uint16_t BG_COLOR    = 0x2104;  // dark navy
+static const uint16_t TEXT_COLOR   = 0xFFFF;  // white
+static const uint16_t ACCENT_COLOR = 0x07E0;  // green
+static const uint16_t DIM_COLOR    = 0x8410;  // dim gray
+
+// Arduino_GFX does not have textWidth(); use getTextBounds() to measure.
+static int16_t textWidth(const char *str) {
+    int16_t x1, y1;
+    uint16_t w, h;
+    gfx.getTextBounds(str, 0, 0, &x1, &y1, &w, &h);
+    return (int16_t)w;
+}
+
+static void centerText(const char *str, int16_t y, uint16_t color, uint8_t size) {
+    gfx.setTextColor(color);
+    gfx.setTextSize(size);
+    int16_t w = textWidth(str);
+    gfx.setCursor((gfx.width() - w) / 2, y);
+    gfx.print(str);
+}
 
 static void printHex(const uint8_t *data, uint8_t len) {
     for (uint8_t i = 0; i < len; i++) {
@@ -27,27 +82,90 @@ static void printHex(const uint8_t *data, uint8_t len) {
     }
 }
 
+static void uidToStr(const uint8_t *uid, uint8_t len, char *buf) {
+    uint8_t pos = 0;
+    for (uint8_t i = 0; i < len; i++) {
+        if (uid[i] < 0x10) buf[pos++] = '0';
+        else buf[pos++] = "0123456789ABCDEF"[(uid[i] >> 4) & 0x0F];
+        buf[pos++] = "0123456789ABCDEF"[uid[i] & 0x0F];
+        if (i < len - 1) buf[pos++] = ':';
+    }
+    buf[pos] = '\0';
+}
+
+static void drawWaitingScreen() {
+    gfx.fillScreen(BG_COLOR);
+    centerText("ESP Jukebox", 40, TEXT_COLOR, 2);
+    centerText("Waiting for", 160, DIM_COLOR, 2);
+    centerText("tag...", 190, DIM_COLOR, 2);
+}
+
+static void drawTagScreen(const uint8_t *uid, uint8_t uidLen) {
+    gfx.fillScreen(BG_COLOR);
+
+    centerText("TAG DETECTED", 40, ACCENT_COLOR, 2);
+
+    // UID byte count
+    char lenStr[16];
+    snprintf(lenStr, sizeof(lenStr), "UID (%d bytes)", uidLen);
+    centerText(lenStr, 90, TEXT_COLOR, 1);
+
+    // UID hex string
+    char uidStr[64];
+    uidToStr(uid, uidLen, uidStr);
+
+    // Pick font size that fits in the round display; split long UIDs to two lines
+    if (uidLen > 4) {
+        gfx.setTextSize(2);
+        if (textWidth(uidStr) > 280) {
+            int split = (uidLen + 1) / 2;
+            char lineBuf[32];
+            uidToStr(uid, split, lineBuf);
+            centerText(lineBuf, 140, TEXT_COLOR, 2);
+            uidToStr(uid + split, uidLen - split, lineBuf);
+            centerText(lineBuf, 170, TEXT_COLOR, 2);
+        } else {
+            centerText(uidStr, 160, TEXT_COLOR, 2);
+        }
+    } else {
+        centerText(uidStr, 160, TEXT_COLOR, 3);
+    }
+
+    centerText("Remove tag...", 300, DIM_COLOR, 1);
+}
+
+// --- Setup ---
+
 void setup() {
     Serial.begin(115200);
     while (!Serial) delay(10);
     delay(200);
     Serial.println();
-    Serial.println("PN532 HSU demo starting...");
+    Serial.println("ESP Jukebox starting...");
 
-    // Explicitly bring up UART2 on our remapped pins before the PN532 lib touches it.
+    // --- TFT init ---
+    pinMode(TFT_BL, OUTPUT);
+    digitalWrite(TFT_BL, HIGH);
+
+    gfx.begin();
+    drawWaitingScreen();
+
+    // --- PN532 init ---
     Serial2.begin(115200, SERIAL_8N1, PN532_TX, PN532_RX);
-
     nfc.begin();
 
     uint32_t versiondata = nfc.getFirmwareVersion();
     if (!versiondata) {
         Serial.println("Did not find PN532.");
-        Serial.println("Running raw-byte diagnostic: sending wake-up + firmware-version frame...");
-        // Wake-up preamble
+        gfx.fillScreen(BG_COLOR);
+        centerText("PN532", 140, 0xF800, 2);      // red
+        centerText("NOT FOUND", 170, 0xF800, 2);
+
+        // Raw diagnostic
+        Serial.println("Running raw-byte diagnostic...");
         const uint8_t wake[] = {0x55, 0x55, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
         Serial2.write(wake, sizeof(wake));
-        // GetFirmwareVersion command frame
         const uint8_t gfv[] = {0x00, 0x00, 0xFF, 0x02, 0xFE, 0xD4, 0x02, 0x2A, 0x00};
         Serial2.write(gfv, sizeof(gfv));
         Serial2.flush();
@@ -65,11 +183,10 @@ void setup() {
             }
         }
         Serial.println();
-        if (bytesIn == 0) {
-            Serial.println("No bytes received. Likely: DIP not both OFF, wrong wiring, or no power.");
-        } else {
-            Serial.println("Bytes received -> UART link is alive. Check protocol/baud or retry.");
-        }
+        if (bytesIn == 0)
+            Serial.println("No bytes received. Check DIP switches, wiring, power.");
+        else
+            Serial.println("Bytes received -> UART link alive. Check protocol/baud.");
         while (true) delay(1000);
     }
 
@@ -84,96 +201,14 @@ void setup() {
     Serial.println("Waiting for an ISO14443A card...");
 }
 
-
-
-static const uint8_t KNOWN_KEYS[][6] = {
-    {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF},  // factory default
-    {0xD3, 0xF7, 0xD3, 0xF7, 0xD3, 0xF7},  // NDEF data sectors
-    {0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5},  // MAD key (sector 0 after NDEF format)
-    {0x4D, 0x3A, 0x99, 0xC3, 0x51, 0xDD},  // commonly published key
-    {0x1A, 0x98, 0x2C, 0x7E, 0x45, 0x9A},  // commonly published key
-    {0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5},  // MAD KEYB variant
-};
-
-// create a list of known key names for easier debugging
-static const char *KNOWN_KEY_NAMES[] = {
-    "Factory default",
-    "NDEF data sectors",
-    "MAD key (sector 0 after NDEF format)",
-    "Commonly published key #1",
-    "Commonly published key #2",
-    "MAD KEYB variant",
-};
-
-static const uint8_t NUM_KEYS = sizeof(KNOWN_KEYS) / 6;
-
-static void dumpCard() {
-    Serial.println();
-    Serial.println("=== MIFARE Classic 1K full dump ===");
-
-    for (uint8_t sector = 0; sector < 16; sector++) {
-        uint8_t trailerBlock = sector * 4 + 3;
-        int8_t keyIdx = -1;
-
-        // A failed auth deselects the card on the PN532, so re-select before each key try.
-        for (uint8_t k = 0; k < NUM_KEYS; k++) {
-            uint8_t u[7];
-            uint8_t uLen = 0;
-            if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 200)) continue;
-            if (nfc.mifareclassic_AuthenticateBlock(u, uLen, trailerBlock, 0,
-                                                   (uint8_t *)KNOWN_KEYS[k])) {
-                keyIdx = k;
-                break;
-            }
-        }
-
-        Serial.print("Sector ");
-        if (sector < 10) Serial.print(' ');
-        Serial.print(sector);
-        if (keyIdx < 0) {
-            Serial.println("  [all known keys failed]");
-            continue;
-        }
-        Serial.print("  KEYA=");
-        printHex(KNOWN_KEYS[keyIdx], 6);
-        Serial.print("  (");
-        Serial.print(KNOWN_KEY_NAMES[keyIdx]);
-        Serial.println(")");
-
-        for (uint8_t b = 0; b < 4; b++) {
-            uint8_t block = sector * 4 + b;
-            uint8_t data[16];
-            if (!nfc.mifareclassic_ReadDataBlock(block, data)) {
-                Serial.print("  blk ");
-                if (block < 10) Serial.print(' ');
-                Serial.print(block);
-                Serial.println(" | read failed");
-                continue;
-            }
-            Serial.print("  blk ");
-            if (block < 10) Serial.print(' ');
-            Serial.print(block);
-            Serial.print(" | ");
-            printHex(data, 16);
-            Serial.print(" | ");
-            for (uint8_t i = 0; i < 16; i++) {
-                char c = (data[i] >= 0x20 && data[i] < 0x7F) ? (char)data[i] : '.';
-                Serial.print(c);
-            }
-            if (b == 3) Serial.print("  <- trailer");
-            else if (sector == 0 && b == 0) Serial.print("  <- manufacturer");
-            Serial.println();
-        }
-    }
-    Serial.println("=== End dump ===");
-    Serial.println();
-}
+// --- Loop ---
 
 void loop() {
     uint8_t uid[7] = {0};
     uint8_t uidLength = 0;
 
-    bool found = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, 1000);
+    bool found = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, 500);
+
     if (found) {
         Serial.print("Card detected. UID (");
         Serial.print(uidLength, DEC);
@@ -181,13 +216,17 @@ void loop() {
         printHex(uid, uidLength);
         Serial.println();
 
-        dumpCard();
+        drawTagScreen(uid, uidLength);
 
-        // Wait for removal so we don't re-dump in a tight loop while the card sits on the reader.
-        Serial.println("Remove card to dump the next one...");
+        // Wait for tag removal
+        Serial.println("Remove tag...");
         uint8_t u[7];
         uint8_t uLen;
-        while (nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 200)) delay(100);
+        while (nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 200)) {
+            delay(100);
+        }
         Serial.println("Card removed.");
+
+        drawWaitingScreen();
     }
 }
