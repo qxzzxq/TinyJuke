@@ -1,9 +1,6 @@
 # ESP Jukebox
 
-An RFID-driven jukebox built around an ESP32. Two play modes:
-
-1. **Music mode** — scan an NFC tag to play the linked track. Tag stickers are embedded in 3D-printed objects themed around the music they trigger.
-2. **Orchestra mode** — play a multi-track orchestral piece one instrument at a time. Each instrument (violin, cello, harp, flute, saxophone, trumpet, drum, tuba, …) has its own NFC tag and its own soundtrack. Once a piece starts, all instrument tracks run on a shared master clock — scanning an instrument tag **joins that instrument into the piece already in progress**, staying synchronized with the others. Unscanning (or removing) a tag mutes that instrument without stopping the piece.
+An RFID-driven jukebox built around an ESP32. Scan an NFC tag to play the linked track. Tag stickers are embedded in 3D-printed objects themed around the music they trigger.
 
 ## Hardware
 
@@ -51,9 +48,7 @@ MAX98357A configuration pins:
 - **GAIN** — TBD (leaving floating gives 9 dB; tie to GND for 12 dB, Vin for 3 dB). Start floating and adjust if the speaker is too quiet or clipping.
 - **SD / Mode** — leave floating for (L+R)/2 mono mix, or tie to GND for left-channel only.
 
-## Features
-
-### Music mode
+## How it works
 
 Each NFC tag UID maps to a single audio file on the SD card. When a tag is scanned:
 
@@ -63,47 +58,24 @@ Each NFC tag UID maps to a single audio file on the SD card. When a tag is scann
 
 Unknown tags are logged over serial and ignored (or play a short "unknown tag" chirp — TBD).
 
-### Orchestra mode
-
-Each orchestral piece is a folder of per-instrument tracks of identical length and sample rate. One track is designated the **master** (typically a click or a low-volume reference mix); it starts when the piece is selected and drives the playback clock for all other tracks.
-
-1. A piece is selected (via a dedicated "piece" tag, or a button + tag combo — TBD)
-2. The master timeline starts. All instrument tracks are *loaded and muted*
-3. Scanning an instrument tag unmutes that instrument at the current playback position — so it joins mid-piece, in sync
-4. Removing the tag (or scanning it again — TBD) mutes that instrument without stopping the piece
-5. The piece loops or stops at the end — TBD
-
-**Sync strategy:** all instrument tracks are mixed in software against a single sample counter. Scanning a tag doesn't re-seek the track; it just flips a per-instrument mute flag, so every instrument always plays from the same absolute position in the piece.
-
 ## SD card layout
 
 ```
 /
-├── music/                        # Music mode
+├── music/                        # Audio files
 │   ├── <uid>.mp3                 # filename = NFC tag UID in hex
 │   └── ...
-├── orchestra/                    # Orchestra mode
-│   ├── piece_01_vivaldi_spring/
-│   │   ├── _master.wav           # silent or reference mix, drives the clock
-│   │   ├── violin.wav
-│   │   ├── cello.wav
-│   │   ├── flute.wav
-│   │   └── ...
-│   └── piece_02_.../
 └── tags.json                     # UID → action mapping (see below)
 ```
 
-`tags.json` maps each tag UID to either a music file, an orchestra piece, or an instrument role:
+`tags.json` maps each tag UID to a music file:
 
 ```json
 {
-  "04A224B2C38081": { "mode": "music",      "file": "music/dragon.mp3" },
-  "04B1C3D4E5F6A0": { "mode": "orchestra",  "piece": "piece_01_vivaldi_spring" },
-  "04112233445566": { "mode": "instrument", "instrument": "violin" }
+  "04A224B2C38081": { "file": "music/dragon.mp3" },
+  "04B1C3D4E5F6A0": { "file": "music/beethoven.mp3" }
 }
 ```
-
-Instrument tags are generic — the same violin tag plays whichever piece is currently loaded.
 
 ## Building & flashing
 
@@ -118,7 +90,7 @@ Instrument tags are generic — the same violin tag plays whichever piece is cur
 **Pins** are defined in a single `config.h` header so they can be changed in one place if the wiring evolves.
 
 **Flash steps:**
-1. Format SD card as FAT32, copy `music/`, `orchestra/`, and `tags.json` to the root
+1. Format SD card as FAT32, copy `music/` and `tags.json` to the root
 2. Open the sketch, select board "LOLIN D32 PRO"
 3. Build and upload over USB
 4. Open the serial monitor at 115200 baud to see boot diagnostics and scanned UIDs
@@ -133,4 +105,4 @@ Instrument tags are generic — the same violin tag plays whichever piece is cur
 
 ## Status
 
-Work in progress. See `PROJECT.md` for the current milestone plan and open decisions.
+Work in progress.
