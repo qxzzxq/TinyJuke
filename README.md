@@ -91,8 +91,8 @@ Unknown tags are logged over serial and ignored (or play a short "unknown tag" c
 
 ```json
 {
-  "04A224B2C38081": { "file": "music/dragon.wav" },
-  "04B1C3D4E5F6A0": { "file": "music/beethoven.wav" }
+  "810C2B07": { "file": "music/sample-12s.wav" },
+  "52F41307": { "file": "music/gc_22k.wav" }
 }
 ```
 
