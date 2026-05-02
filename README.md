@@ -47,7 +47,7 @@ Set the PN532's DIP switches to HSU mode (SEL0 = 0, SEL1 = 0). Note that TX on o
 
 ### TFT display (SPI)
 
-The ST7735S display uses standard SPI. It shares the VSPI bus with the onboard microSD card — both use the ESP-IDF SPI driver, separated by their CS pins.
+The ST7735S display uses standard SPI. It shares the VSPI bus with the onboard microSD card — both use Arduino's bare-metal SPI (same `_spi_bus_array`), separated by their CS pins.
 
 | TFT pin | ESP32 GPIO | Notes                         |
 |---------|------------|-------------------------------|
@@ -70,20 +70,20 @@ MAX98357A configuration pins:
 
 Each NFC tag UID maps to a single audio file on the SD card. When a tag is scanned:
 
-1. The current track (if any) fades out over ~200 ms
+1. Any current playback stops immediately
 2. The file mapped to the scanned UID begins playback from the start
-3. Playback continues until the file ends, a new tag is scanned, or the track is stopped
+3. Playback continues until the file ends or the tag is removed
 
-Unknown tags are logged over serial and ignored (or play a short "unknown tag" chirp — TBD).
+Unknown tags are logged over serial and displayed on screen. The tag must be removed before a new tag is accepted — hot-swapping tags mid-playback is not yet supported.
 
 ## SD card layout
 
 ```
 /
-├── music/                        # Audio files
-│   ├── <uid>.wav                 # filename = NFC tag UID in hex
-│   └── ...
-└── tags.json                     # UID → action mapping (see below)
+├── music/                        # WAV audio files (any name)
+│   ├── sample-12s.wav
+│   └── gc_22k.wav
+└── tags.json                     # UID → file mapping (see below)
 ```
 
 `tags.json` maps each tag UID to a music file:
@@ -104,9 +104,9 @@ Unknown tags are logged over serial and ignored (or play a short "unknown tag" c
 - `ArduinoJson` (bblanchon) — parsing `tags.json`
 - `Arduino_GFX` (moononournation) — TFT display driver (ST7735)
 - WAV audio uses the ESP32's built-in I2S driver (no extra library needed)
-- SD card uses the ESP-IDF SPI driver with FatFS (built into the Arduino framework)
+- SD (built-in, Arduino ESP32 framework) — SD card access via SPI
 
-**Pins** are defined in a single `config.h` header so they can be changed in one place if the wiring evolves.
+**Pins** are defined at the top of `src/main.cpp`.
 
 **Flash steps:**
 1. Format SD card as FAT32, copy `music/` and `tags.json` to the root
@@ -124,4 +124,12 @@ Unknown tags are logged over serial and ignored (or play a short "unknown tag" c
 
 ## Status
 
-Work in progress.
+Milestone 1 complete — NFC tag reading, SD card WAV playback, and TFT display are all functional.
+
+## TODO
+
+- **Tag management GUI** — on-device interface to link/unlink music files with NFC tags, no computer needed
+- Audio fade-out on track stop
+- "Unknown tag" audio chirp
+- Software volume control at runtime
+
