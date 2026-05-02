@@ -23,9 +23,14 @@ RFID-driven audio player. Scan an NFC tag → lookup UID in `tags.json` on SD ca
 | 27   | I2S_BCLK          | MAX98357A BCLK                           |
 | 32   | PN532_TX (ESP RX) | Crossed: PN532 TX → ESP32 GPIO 32 (RX)   |
 | 33   | PN532_RX (ESP TX) | Crossed: ESP32 GPIO 33 (TX) → PN532 RX   |
+| 2    | ENC_CLK           | Rotary encoder (KY-040, not yet wired)   |
+| 15   | ENC_DT            | Rotary encoder direction                 |
+| 34   | ENC_SW            | Rotary encoder button (input-only)       |
 | 35   | VBAT              | Battery voltage sense (unused)           |
 
 MAX98357A config: GAIN → GND (12 dB), SD/Mode → float (mono mix). Volume is software-controlled in the WAV player (not yet adjustable at runtime).
+
+KY-040 encoder: CLK→GPIO2, DT→GPIO15, SW→GPIO34, +→3.3V, GND→GND. GPIO 34 is input-only but the module's external 10k pull-up resistor makes the button work. Encoder firmware is a placeholder — `encoder.cpp` returns no-ops until hardware is wired.
 
 ## Hardware
 
@@ -49,10 +54,18 @@ MAX98357A config: GAIN → GND (12 dB), SD/Mode → float (mono mix). Volume is 
 ## Source files
 
 ```
-src/main.cpp          — All firmware (single file, ~400 lines)
+src/
+├── config.h          — Pin definitions, colors, D32 Pro macro fix
+├── audio.h/.cpp      — WavHeader, parseWavHeader, i2sInit, playWav(), stopPlayback()
+├── screen.h/.cpp     — TFT draw functions (extern gfx, uses C_ color constants)
+├── tags.h/.cpp       — tagDoc (JsonDocument), uid formatting, lookupTag()
+├── encoder.h/.cpp    — Rotary encoder reader (placeholder, not yet wired)
+└── main.cpp          — Peripherals (bus, gfx, nfc), setup(), loop(), tagPresent
 platformio.ini        — PlatformIO project config + library dependencies
 README.md             — User-facing docs (wiring, build steps, SD layout)
 ```
+
+`playWav()` accepts a `PN532 &nfc` reference parameter so audio.cpp doesn't depend on a global NFC object. `stopRequested` and `audioPlaying` are global flags in audio.cpp, checked by main.cpp's loop.
 
 ## Libraries (platformio.ini)
 
@@ -70,9 +83,10 @@ WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, d
 **setup() flow:**
 1. TFT init (`gfx.begin()` — initializes VSPI via bare-metal SPI)
 2. SD mount (`SD.begin(4)`, reads `/tags.json` into `JsonDocument tagDoc`)
-3. Boot screen on TFT + short delay
+3. Boot screen on TFT (SD error or waiting screen)
 4. PN532 init with firmware version check + raw-byte diagnostic on failure
-5. Draw waiting screen, enter loop
+5. `nfc.SAMConfig()`, draw waiting screen
+6. `initEncoder()` — placeholder, no-op until encoder is wired
 
 **loop() state machine:**
 - `!tagPresent && found` → tag arrived: lookup UID → draw now-playing → `playWav()` → draw waiting
@@ -93,8 +107,8 @@ WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, d
 ```
 /
 ├── music/              # WAV files (standard PCM, any sample rate)
-├── sample-12s.wav
-├── gc_22k.wav
+│   ├── sample-12s.wav
+│   └── gc_22k.wav
 └── tags.json           # UID → file mapping
 ```
 
@@ -121,7 +135,7 @@ Board: `lolin_d32_pro`, framework: `arduino`, CPU: 240 MHz.
 ## Known constraints
 
 - **D32 Pro `SS` macro conflict:** `pins_arduino.h` defines `#define SS TF_CS` (→ `#define SS 4`). Libraries that use `SS` as a parameter name will fail to compile. Avoid libraries affected by this, or `#undef SS` before including them.
-- **TFT macros conflict:** D32 Pro variant pre-defines `TFT_CS=14`, `TFT_DC=27`, `TFT_RST=33`. `main.cpp` `#undef`s these before redefining.
+- **TFT macros conflict:** D32 Pro variant pre-defines `TFT_CS=14`, `TFT_DC=27`, `TFT_RST=33`. `config.h` includes `<Arduino.h>` first, then `#undef`s the variant values, then redefines ours.
 - **I2S uses legacy driver:** The `driver/i2s.h` API is deprecated in ESP-IDF 5.x. It works but emits warnings. Migration to `i2s_std.h` is a future task.
 - **Single audio track at a time:** No crossfade or queue. Scanning a new tag stops the current track. Tag must be removed before a new tag is accepted.
 - **WAV only:** Standard PCM WAV (16/24-bit, mono/stereo, any sample rate). No MP3/FLAC support.

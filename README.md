@@ -62,6 +62,20 @@ The ST7735S display uses standard SPI. It shares the VSPI bus with the onboard m
 
 The SD card MISO line (GPIO 19) is not connected to the display — the ST7735S does not output data.
 
+### Rotary encoder (KY-040)
+
+Planned for tag management GUI. Not yet wired.
+
+| KY-040 pin | ESP32 GPIO | Notes                      |
+|------------|------------|----------------------------|
+| CLK (A)    | 2          | Rotation pulse             |
+| DT  (B)    | 15         | Direction                  |
+| SW         | 34         | Push button (input-only)   |
+| +          | 3.3V       |                            |
+| GND        | GND        |                            |
+
+The KY-040 module has built-in 10k pull-up resistors. GPIO 34 is input-only on ESP32 — this works because the module handles the pull-up.
+
 MAX98357A configuration pins:
 - **GAIN** — tie to GND for 12 dB and control volume in software. Leaving the pin floating is unreliable (high-impedance input, noise can produce random gain at power-up).
 - **SD / Mode** — leave floating for (L+R)/2 mono mix, or tie to GND for left-channel only.
@@ -100,13 +114,13 @@ Unknown tags are logged over serial and displayed on screen. The tag must be rem
 **Toolchain:** Arduino framework on ESP32 (via Arduino IDE or PlatformIO).
 
 **Libraries:**
-- `https://github.com/elechouse/PN532` — NFC reader (HSU mode)
+- PN532 + PN532_HSU (bundled in `lib/`, `https://github.com/elechouse/PN532`) — NFC reader
 - `ArduinoJson` (bblanchon) — parsing `tags.json`
 - `Arduino_GFX` (moononournation) — TFT display driver (ST7735)
 - WAV audio uses the ESP32's built-in I2S driver (no extra library needed)
 - SD (built-in, Arduino ESP32 framework) — SD card access via SPI
 
-**Pins** are defined at the top of `src/main.cpp`.
+**Pins** are defined in `src/config.h`. The code is split into modules under `src/`: `config.h`, `audio.cpp`, `screen.cpp`, `tags.cpp`, `encoder.cpp`, `main.cpp`.
 
 **Flash steps:**
 1. Format SD card as FAT32, copy `music/` and `tags.json` to the root
