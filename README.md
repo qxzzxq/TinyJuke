@@ -11,7 +11,7 @@ An RFID-driven jukebox built around an ESP32. Scan an NFC tag to play the linked
 | Audio amplifier   | MAX98357A (I²S class-D)          | Mono                                 |
 | Speaker           | 4 Ω, 3 W, mono                   | Driven directly from MAX98357A       |
 | Storage           | microSD card (FAT32)             | In the D32 Pro's onboard slot        |
-| Display           | 1.53" round TFT, 360×360         | ST77916 driver, QSPI                |
+| Display           | 1.8" TFT, 128×160                | ST7735S driver, SPI               |
 
 ## Wiring
 
@@ -45,23 +45,22 @@ Set the PN532's DIP switches to HSU mode (SEL0 = 0, SEL1 = 0). Note that TX on o
 | Vin           | 5V (VUSB)  |
 | GND           | GND        |
 
-### TFT display (QSPI)
+### TFT display (SPI)
 
-The ST77916 display uses Quad SPI (4 data lines). It is wired to VSPI which is shared with the onboard microSD card — only one can be active at a time.
+The ST7735S display uses standard SPI. It shares the VSPI bus with the onboard microSD card — both use the ESP-IDF SPI driver, separated by their CS pins.
 
 | TFT pin | ESP32 GPIO | Notes                         |
 |---------|------------|-------------------------------|
-| SDA     | 23         | QSPI IO0, shared with SD_MOSI |         
-| IO1     | 19         | QSPI IO1, shared with SD_MISO |
-| IO2     | 21         | QSPI IO2                      |
-| IO3     | 22         | QSPI IO3                      |
-| SCL     | 18         | Shared with SD_SCK            |
+| SDA     | 23         | MOSI, shared with SD_MOSI     |
+| SCL     | 18         | SCK, shared with SD_SCK       |
 | CS      | 5          |                               |
+| DC      | 21         | Data/Command                  |
 | RST     | 14         |                               |
-| BL      | 13         | Backlight                      |
-| TE      | —          | Leave unconnected             |
-| VCC     | 5V (VUSB)  |                               |
+| BLK     | 13         | Backlight                     |
+| VDD     | 3.3V       |                               |
 | GND     | GND        |                               |
+
+The SD card MISO line (GPIO 19) is not connected to the display — the ST7735S does not output data.
 
 MAX98357A configuration pins:
 - **GAIN** — tie to GND for 12 dB and control volume in software. Leaving the pin floating is unreliable (high-impedance input, noise can produce random gain at power-up).
@@ -102,10 +101,10 @@ Unknown tags are logged over serial and ignored (or play a short "unknown tag" c
 
 **Libraries:**
 - `https://github.com/elechouse/PN532` — NFC reader (HSU mode)
-- `ESP32-audioI2S` (schreibfaul1) — MP3/WAV decoding over I²S
-- `ArduinoJson` — parsing `tags.json`
-- `Arduino_GFX` (moononournation) — TFT display driver (ST77916)
-- `SD` (built-in) — SD card access
+- `ArduinoJson` (bblanchon) — parsing `tags.json`
+- `Arduino_GFX` (moononournation) — TFT display driver (ST7735)
+- WAV audio uses the ESP32's built-in I2S driver (no extra library needed)
+- SD card uses the ESP-IDF SPI driver with FatFS (built into the Arduino framework)
 
 **Pins** are defined in a single `config.h` header so they can be changed in one place if the wiring evolves.
 
