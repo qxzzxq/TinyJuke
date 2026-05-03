@@ -9,6 +9,7 @@
 #include "screen.h"
 #include "audio.h"
 #include "encoder.h"
+#include "web.h"
 
 #include <PN532_HSU.h>
 #include <PN532.h>
@@ -115,6 +116,10 @@ void setup() {
 
   // 5. Init encoder (placeholder)
   initEncoder();
+
+  // 6. Web server disabled until encoder is wired.
+  //    Will be triggered by encoder long-press to enter admin mode.
+  // initWebServer();
 }
 
 // ================================================================
