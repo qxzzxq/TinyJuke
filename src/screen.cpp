@@ -79,74 +79,97 @@ void drawUnknownTagScreen(const uint8_t *uid, uint8_t uidLen) {
 }
 
 // BMP loader (24-bit only, 128x160)
-static bool loadBMP(const char *path, uint16_t *buf) {
+// Decode a 24-bit BMP, return heap-allocated RGB565 buffer + dimensions.
+// Caller must free(). Returns nullptr on failure.
+static uint16_t *loadBMP(const char *path, int *outW, int *outH) {
   File f = SD.open(path);
-  if (!f) return false;
+  if (!f) return nullptr;
 
   uint8_t h[54];
-  if (f.read(h, 54) != 54 || h[0] != 'B' || h[1] != 'M') { f.close(); return false; }
+  if (f.read(h, 54) != 54 || h[0] != 'B' || h[1] != 'M') { f.close(); return nullptr; }
 
   uint32_t off = h[10] | (h[11] << 8) | (h[12] << 16) | (h[13] << 24);
   int32_t  w   = h[18] | (h[19] << 8) | (h[20] << 16) | (h[21] << 24);
   int32_t  ht  = h[22] | (h[23] << 8) | (h[24] << 16) | (h[25] << 24);
   uint16_t bpp = h[28] | (h[29] << 8);
 
-  if (w != 128 || (ht != 160 && ht != -160)) { f.close(); return false; }
+  if (bpp != 24 || w < 1 || ht == 0) { f.close(); return nullptr; }
   if (ht < 0) ht = -ht;
+  if (w > 600 || ht > 600) { f.close(); return nullptr; } // sanity limit
+
+  int pixels = w * ht;
+  uint16_t *buf = (uint16_t *)malloc(pixels * 2);
+  if (!buf) { f.close(); return nullptr; }
 
   int rowBytes = ((w * bpp + 31) / 32) * 4;
   f.seek(off);
 
-  if (bpp == 24) {
-    uint8_t row[128 * 3 + 4];
-    for (int y = ht - 1; y >= 0; y--) {
-      f.read(row, rowBytes);
-      uint16_t *dst = buf + y * 128;
-      for (int x = 0; x < 128; x++) {
-        uint8_t b = row[x * 3];
-        uint8_t g = row[x * 3 + 1];
-        uint8_t r = row[x * 3 + 2];
-        dst[x] = ((b & 0xF8) << 8) | ((g & 0xFC) << 3) | (r >> 3);
-      }
+  uint8_t *row = (uint8_t *)malloc(rowBytes);
+  if (!row) { free(buf); f.close(); return nullptr; }
+
+  // BMP rows are bottom-up
+  for (int y = ht - 1; y >= 0; y--) {
+    f.read(row, rowBytes);
+    uint16_t *dst = buf + y * w;
+    for (int x = 0; x < w; x++) {
+      uint8_t b = row[x * 3];
+      uint8_t g = row[x * 3 + 1];
+      uint8_t r = row[x * 3 + 2];
+      dst[x] = ((b & 0xF8) << 8) | ((g & 0xFC) << 3) | (r >> 3);
     }
-  } else {
-    f.close(); return false;
   }
 
+  free(row);
   f.close();
-  return true;
+  *outW = w;
+  *outH = ht;
+  return buf;
+}
+
+// Nearest-neighbor scale from src to 128x128 dst buffer.
+static void scaleTo128(const uint16_t *src, int srcW, int srcH, uint16_t *dst) {
+  for (int dy = 0; dy < 128; dy++) {
+    int sy = dy * srcH / 128;
+    const uint16_t *srcRow = src + sy * srcW;
+    uint16_t *dstRow = dst + dy * 128;
+    for (int dx = 0; dx < 128; dx++)
+      dstRow[dx] = srcRow[dx * srcW / 128];
+  }
 }
 
 void drawNowPlayingScreen(const TagInfo &tag) {
-  // ---- determine image source ----
-  // Priority: tags.json img field > WAV metadata > none
-  uint16_t *bmpBuf = (uint16_t *)malloc(128 * 160 * 2);
-  bool hasBmp = false;
+  // ---- load image ----
+  uint16_t *rawBmp = nullptr;
+  uint16_t *scaled = (uint16_t *)malloc(128 * 128 * 2);
+  int bmpW = 0, bmpH = 0;
+  bool hasImg = false;
 
-  if (tag.img) {
-    // Load from /img/ directory
+  if (tag.img && scaled) {
     char bmpPath[192];
     if (tag.img[0] == '/')
       snprintf(bmpPath, sizeof(bmpPath), "%s", tag.img);
     else
       snprintf(bmpPath, sizeof(bmpPath), "/img/%s", tag.img);
-    hasBmp = bmpBuf && loadBMP(bmpPath, bmpBuf);
+    rawBmp = loadBMP(bmpPath, &bmpW, &bmpH);
+    if (rawBmp) {
+      scaleTo128(rawBmp, bmpW, bmpH, scaled);
+      free(rawBmp);
+      hasImg = true;
+    }
   }
 
-  // ---- determine text fields ----
-  // Priority: tags.json fields > WAV metadata > filename fallback
+  // ---- text fields ----
   const char *title  = tag.title;
   const char *artist = tag.artist;
   const char *album  = tag.album;
 
-  // If no tags.json metadata, try WAV LIST INFO
   char metaTitle[64]  = {};
   char metaArtist[64] = {};
   if (!title || !artist) {
     WavMeta meta;
     parseWavMeta(tag.file, meta);
-    if (!title  && meta.title[0])  { metaTitle[63] = '\0'; strncpy(metaTitle, meta.title, 63); title = metaTitle; }
-    if (!artist && meta.artist[0]) { metaArtist[63] = '\0'; strncpy(metaArtist, meta.artist, 63); artist = metaArtist; }
+    if (!title  && meta.title[0])  { strncpy(metaTitle,  meta.title,  63); title  = metaTitle; }
+    if (!artist && meta.artist[0]) { strncpy(metaArtist, meta.artist, 63); artist = metaArtist; }
   }
 
   // Filename fallback
@@ -158,37 +181,40 @@ void drawNowPlayingScreen(const TagInfo &tag) {
   if (ext) *ext = '\0';
 
   // ---- draw ----
-  if (hasBmp) {
-    gfx.draw16bitRGBBitmap(0, 0, bmpBuf, 128, 160);
+  gfx.fillScreen(C_BG);
 
-    // Choose overlay height based on content
-    int barH = (artist || album) ? 36 : 22;
-    int barY = 160 - barH;
-    gfx.fillRect(0, barY, 128, barH, C_BG);
-    gfx.fillRect(0, barY, 128, 1, C_ACCENT);
+  if (hasImg) {
+    // 128x128 album art at top, text bar at bottom
+    gfx.draw16bitRGBBitmap(0, 0, scaled, 128, 128);
+
+    // Text area: y=128..159 (32px)
+    gfx.fillRect(0, 128, 128, 32, C_SURFACE);
+    gfx.fillRect(0, 128, 128, 1, C_ACCENT);
 
     const char *line1 = title ? title : fallback;
+    char buf[64];
     int16_t tw = textWidth(line1);
-    if (tw > 120) {
-      char trunc[20];
-      strncpy(trunc, line1, 16); trunc[16] = '\0'; strcat(trunc, "...");
-      centerText(trunc, barY + 4, C_TEXT, 1);
+    if (tw > 122) {
+      strncpy(buf, line1, 19); buf[19] = '\0'; strcat(buf, "...");
+      centerText(buf, 132, C_TEXT, 1);
     } else {
-      centerText(line1, barY + 4, C_TEXT, 1);
+      centerText(line1, 132, C_TEXT, 1);
     }
+
     if (artist) {
-      char line2[64];
-      if (album) snprintf(line2, sizeof(line2), "%s \267 %s", artist, album);
-      else snprintf(line2, sizeof(line2), "%s", artist);
-      centerText(line2, barY + 16, C_MUTED, 1);
+      if (album) snprintf(buf, sizeof(buf), "%s  \267  %s", artist, album);
+      else snprintf(buf, sizeof(buf), "%s", artist);
+      centerText(buf, 146, C_MUTED, 1);
+    } else if (album) {
+      centerText(album, 146, C_MUTED, 1);
     }
   } else {
-    gfx.fillScreen(C_BG);
-
+    // Text-only layout
     if (title) {
-      centerText(title, 35, C_TEXT, 1);
-      if (artist) centerText(artist, 50, C_MUTED, 1);
-      if (album)  centerText(album, 62, C_ACCENT, 1);
+      centerText("Playing", 20, C_ACCENT, 2);
+      centerText(title, 55, C_TEXT, 1);
+      if (artist) centerText(artist, 68, C_MUTED, 1);
+      if (album)  centerText(album, 80, C_ACCENT, 1);
     } else {
       centerText("Playing", 20, C_ACCENT, 2);
       int16_t w = textWidth(fallback);
@@ -203,7 +229,7 @@ void drawNowPlayingScreen(const TagInfo &tag) {
     drawHintBar("remove tag to stop");
   }
 
-  if (hasBmp) free(bmpBuf);
+  if (scaled) free(scaled);
 }
 
 void drawSDErrorScreen() {
