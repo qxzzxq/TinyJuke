@@ -106,17 +106,23 @@ WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, d
 
 ```
 /
+├── img/                # Album art (128×160 BMP, 24-bit)
+│   └── album1.bmp
 ├── music/              # WAV files (standard PCM, any sample rate)
-│   ├── sample-12s.wav
-│   └── gc_22k.wav
-└── tags.json           # UID → file mapping
+│   └── song.wav
+└── tags.json           # UID → file + metadata mapping
 ```
 
-`tags.json` format:
+`tags.json` format (only `file` is required):
 ```json
 {
-  "81:0C:2B:07": { "file": "music/sample-12s.wav" },
-  "52:F4:13:07": { "file": "music/gc_22k.wav" }
+  "81:0C:2B:07": {
+    "file": "music/sample-12s.wav",
+    "img": "album1.bmp",
+    "title": "My Song",
+    "artist": "Artist Name",
+    "album": "Album Title"
+  }
 }
 ```
 

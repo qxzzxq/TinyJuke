@@ -1,4 +1,5 @@
 #include "audio.h"
+#include "web.h"
 #include <driver/i2s.h>
 
 bool audioPlaying = false;
@@ -148,6 +149,8 @@ void playWav(const char *filepath, PN532 &nfc) {
       break;
     remaining -= bytesRead;
 
+    handleWebClient();
+
     if (millis() - lastNfcCheck >= 150) {
       lastNfcCheck = millis();
       uint8_t u[7]; uint8_t uLen;
@@ -168,4 +171,70 @@ void playWav(const char *filepath, PN532 &nfc) {
 
 void stopPlayback() {
   stopRequested = true;
+}
+
+// ----------------------------------------------------------------
+//  WAV metadata extraction (LIST INFO chunk)
+// ----------------------------------------------------------------
+
+void parseWavMeta(const char *filepath, WavMeta &meta) {
+  memset(&meta, 0, sizeof(meta));
+
+  char path[192];
+  if (filepath[0] != '/') {
+    path[0] = '/';
+    strncpy(path + 1, filepath, sizeof(path) - 2);
+    path[sizeof(path) - 1] = '\0';
+  } else {
+    strncpy(path, filepath, sizeof(path) - 1);
+    path[sizeof(path) - 1] = '\0';
+  }
+
+  File f = SD.open(path);
+  if (!f) return;
+
+  uint8_t buf[12];
+  if (f.read(buf, 12) != 12) { f.close(); return; }
+  if (memcmp(buf, "RIFF", 4) != 0) { f.close(); return; }
+
+  uint32_t riffSize = buf[4] | (buf[5] << 8) | (buf[6] << 16) | (buf[7] << 24);
+  uint32_t pos = 12;
+  uint32_t end = riffSize + 8;
+  if (end > 500000) end = 500000;
+
+  while (pos + 8 < end) {
+    f.seek(pos);
+    if (f.read(buf, 8) != 8) break;
+    uint32_t size = buf[4] | (buf[5] << 8) | (buf[6] << 16) | (buf[7] << 24);
+
+    if (memcmp(buf, "LIST", 4) == 0 && size >= 4) {
+      if (f.read(buf, 4) != 4) break;
+      if (memcmp(buf, "INFO", 4) != 0) { pos += 8 + size; continue; }
+
+      uint32_t infoEnd = pos + 8 + size;
+      pos += 12;
+
+      while (pos + 8 < infoEnd) {
+        f.seek(pos);
+        if (f.read(buf, 8) != 8) break;
+        uint32_t sub = buf[4] | (buf[5] << 8) | (buf[6] << 16) | (buf[7] << 24);
+
+        char *dst = nullptr;
+        int max = 0;
+        if      (memcmp(buf, "INAM", 4) == 0) { dst = meta.title;  max = 63; }
+        else if (memcmp(buf, "IART", 4) == 0) { dst = meta.artist; max = 63; }
+
+        if (dst && sub > 0) {
+          int n = (sub < max) ? sub : max;
+          f.read((uint8_t *)dst, n);
+          dst[n] = '\0';
+          while (n > 0 && (dst[n-1] == 0 || dst[n-1] == ' ')) dst[--n] = '\0';
+        }
+        pos += 8 + sub + (sub & 1);
+      }
+      break;
+    }
+    pos += 8 + size;
+  }
+  f.close();
 }

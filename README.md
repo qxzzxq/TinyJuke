@@ -94,20 +94,30 @@ Unknown tags are logged over serial and displayed on screen. The tag must be rem
 
 ```
 /
-├── music/                        # WAV audio files (any name)
+├── img/                          # Album art (128×160 BMP, 24-bit)
+│   └── album1.bmp
+├── music/                        # WAV audio files
 │   ├── sample-12s.wav
 │   └── gc_22k.wav
-└── tags.json                     # UID → file mapping (see below)
+└── tags.json                     # UID → file + metadata mapping
 ```
 
-`tags.json` maps each tag UID to a music file:
+`tags.json` maps each tag UID to a music file. Optional fields provide album art and metadata:
 
 ```json
 {
-  "81:0C:2B:07": { "file": "music/sample-12s.wav" },
+  "81:0C:2B:07": {
+    "file": "music/sample-12s.wav",
+    "img": "album1.bmp",
+    "title": "My Song",
+    "artist": "Artist Name",
+    "album": "Album Title"
+  },
   "52:F4:13:07": { "file": "music/gc_22k.wav" }
 }
 ```
+
+All fields except `file` are optional. `img` paths are relative to `/img/` on the SD card. Metadata priority: tags.json fields → WAV LIST INFO metadata → filename without `.wav`.
 
 ## Building & flashing
 

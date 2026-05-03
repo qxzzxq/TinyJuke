@@ -1,6 +1,8 @@
 #include "screen.h"
 #include "tags.h"
 #include "encoder.h"
+#include "audio.h"  // for WavMeta, parseWavMeta
+#include <SD.h>
 
 // Screen is 128×160 portrait. Text size 2 = ~12px, size 1 = ~6px.
 
@@ -76,24 +78,132 @@ void drawUnknownTagScreen(const uint8_t *uid, uint8_t uidLen) {
   drawHintBar("hold to dismiss");
 }
 
-void drawNowPlayingScreen(const char *filepath) {
-  gfx.fillScreen(C_BG);
-  centerText("Playing", 20, C_ACCENT, 2);
+// BMP loader (24-bit only, 128x160)
+static bool loadBMP(const char *path, uint16_t *buf) {
+  File f = SD.open(path);
+  if (!f) return false;
 
-  const char *name = trimFilename(filepath);
-  gfx.setTextColor(C_TEXT);
-  gfx.setTextSize(1);
-  int16_t w = textWidth(name);
-  if (w > 120) {
-    char trunc[20];
-    strncpy(trunc, name, 16);
-    trunc[16] = '\0';
-    strcat(trunc, "...");
-    centerText(trunc, 65, C_TEXT, 1);
+  uint8_t h[54];
+  if (f.read(h, 54) != 54 || h[0] != 'B' || h[1] != 'M') { f.close(); return false; }
+
+  uint32_t off = h[10] | (h[11] << 8) | (h[12] << 16) | (h[13] << 24);
+  int32_t  w   = h[18] | (h[19] << 8) | (h[20] << 16) | (h[21] << 24);
+  int32_t  ht  = h[22] | (h[23] << 8) | (h[24] << 16) | (h[25] << 24);
+  uint16_t bpp = h[28] | (h[29] << 8);
+
+  if (w != 128 || (ht != 160 && ht != -160)) { f.close(); return false; }
+  if (ht < 0) ht = -ht;
+
+  int rowBytes = ((w * bpp + 31) / 32) * 4;
+  f.seek(off);
+
+  if (bpp == 24) {
+    uint8_t row[128 * 3 + 4];
+    for (int y = ht - 1; y >= 0; y--) {
+      f.read(row, rowBytes);
+      uint16_t *dst = buf + y * 128;
+      for (int x = 0; x < 128; x++) {
+        uint8_t b = row[x * 3];
+        uint8_t g = row[x * 3 + 1];
+        uint8_t r = row[x * 3 + 2];
+        dst[x] = ((b & 0xF8) << 8) | ((g & 0xFC) << 3) | (r >> 3);
+      }
+    }
   } else {
-    centerText(name, 65, C_TEXT, 1);
+    f.close(); return false;
   }
-  drawHintBar("remove tag to stop");
+
+  f.close();
+  return true;
+}
+
+void drawNowPlayingScreen(const TagInfo &tag) {
+  // ---- determine image source ----
+  // Priority: tags.json img field > WAV metadata > none
+  uint16_t *bmpBuf = (uint16_t *)malloc(128 * 160 * 2);
+  bool hasBmp = false;
+
+  if (tag.img) {
+    // Load from /img/ directory
+    char bmpPath[192];
+    if (tag.img[0] == '/')
+      snprintf(bmpPath, sizeof(bmpPath), "%s", tag.img);
+    else
+      snprintf(bmpPath, sizeof(bmpPath), "/img/%s", tag.img);
+    hasBmp = bmpBuf && loadBMP(bmpPath, bmpBuf);
+  }
+
+  // ---- determine text fields ----
+  // Priority: tags.json fields > WAV metadata > filename fallback
+  const char *title  = tag.title;
+  const char *artist = tag.artist;
+  const char *album  = tag.album;
+
+  // If no tags.json metadata, try WAV LIST INFO
+  char metaTitle[64]  = {};
+  char metaArtist[64] = {};
+  if (!title || !artist) {
+    WavMeta meta;
+    parseWavMeta(tag.file, meta);
+    if (!title  && meta.title[0])  { metaTitle[63] = '\0'; strncpy(metaTitle, meta.title, 63); title = metaTitle; }
+    if (!artist && meta.artist[0]) { metaArtist[63] = '\0'; strncpy(metaArtist, meta.artist, 63); artist = metaArtist; }
+  }
+
+  // Filename fallback
+  const char *name = trimFilename(tag.file);
+  char fallback[32];
+  strncpy(fallback, name, sizeof(fallback) - 1);
+  fallback[sizeof(fallback) - 1] = '\0';
+  char *ext = strrchr(fallback, '.');
+  if (ext) *ext = '\0';
+
+  // ---- draw ----
+  if (hasBmp) {
+    gfx.draw16bitRGBBitmap(0, 0, bmpBuf, 128, 160);
+
+    // Choose overlay height based on content
+    int barH = (artist || album) ? 36 : 22;
+    int barY = 160 - barH;
+    gfx.fillRect(0, barY, 128, barH, C_BG);
+    gfx.fillRect(0, barY, 128, 1, C_ACCENT);
+
+    const char *line1 = title ? title : fallback;
+    int16_t tw = textWidth(line1);
+    if (tw > 120) {
+      char trunc[20];
+      strncpy(trunc, line1, 16); trunc[16] = '\0'; strcat(trunc, "...");
+      centerText(trunc, barY + 4, C_TEXT, 1);
+    } else {
+      centerText(line1, barY + 4, C_TEXT, 1);
+    }
+    if (artist) {
+      char line2[64];
+      if (album) snprintf(line2, sizeof(line2), "%s \267 %s", artist, album);
+      else snprintf(line2, sizeof(line2), "%s", artist);
+      centerText(line2, barY + 16, C_MUTED, 1);
+    }
+  } else {
+    gfx.fillScreen(C_BG);
+
+    if (title) {
+      centerText(title, 35, C_TEXT, 1);
+      if (artist) centerText(artist, 50, C_MUTED, 1);
+      if (album)  centerText(album, 62, C_ACCENT, 1);
+    } else {
+      centerText("Playing", 20, C_ACCENT, 2);
+      int16_t w = textWidth(fallback);
+      if (w > 120) {
+        char trunc[20];
+        strncpy(trunc, fallback, 16); trunc[16] = '\0'; strcat(trunc, "...");
+        centerText(trunc, 65, C_TEXT, 1);
+      } else {
+        centerText(fallback, 65, C_TEXT, (w > 60) ? 1 : 2);
+      }
+    }
+    drawHintBar("remove tag to stop");
+  }
+
+  if (hasBmp) free(bmpBuf);
 }
 
 void drawSDErrorScreen() {

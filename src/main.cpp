@@ -13,6 +13,7 @@
 #include "audio.h"
 #include "encoder.h"
 #include "gui.h"
+#include "web.h"
 
 #include <PN532_HSU.h>
 #include <PN532.h>
@@ -118,6 +119,9 @@ void setup() {
 
   // 5. Init encoder (loads saved volume, sets up interrupts)
   initEncoder();
+
+  // 6. Start web server
+  initWebServer();
 }
 
 // ================================================================
@@ -128,6 +132,9 @@ void loop() {
     guiLoop();
     return;
   }
+
+  // Service web requests
+  handleWebClient();
 
   // --- Jukebox mode: handle encoder for volume / menu entry ---
   int ev = readEncoder();
@@ -172,11 +179,11 @@ void loop() {
     printHex(uid, uidLength); Serial.println();
 
     if (sdReady) {
-      const char *filepath = lookupTag(uid, uidLength);
-      if (filepath) {
-        Serial.print("Playing: "); Serial.println(filepath);
-        drawNowPlayingScreen(filepath);
-        playWav(filepath, nfc);
+      TagInfo tag = lookupTag(uid, uidLength);
+      if (tag.file) {
+        Serial.print("Playing: "); Serial.println(tag.file);
+        drawNowPlayingScreen(tag);
+        playWav(tag.file, nfc);
         drawWaitingScreen();
       } else {
         Serial.println("Unknown tag.");

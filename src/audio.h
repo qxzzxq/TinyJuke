@@ -5,6 +5,11 @@
 #include <SD.h>
 #include <PN532.h>
 
+struct WavMeta {
+  char title[64];
+  char artist[64];
+};
+
 struct WavHeader {
   uint16_t channels;
   uint32_t sampleRate;
@@ -18,3 +23,4 @@ extern bool stopRequested;
 
 void playWav(const char *filepath, PN532 &nfc);
 void stopPlayback();
+void parseWavMeta(const char *filepath, WavMeta &meta);

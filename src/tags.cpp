@@ -22,10 +22,16 @@ void uidToStr(const uint8_t *uid, uint8_t len, char *buf) {
   buf[pos] = '\0';
 }
 
-const char *lookupTag(const uint8_t *uid, uint8_t uidLen) {
+TagInfo lookupTag(const uint8_t *uid, uint8_t uidLen) {
+  TagInfo info = {};
   char key[32];
   uidToStr(uid, uidLen, key);
-  if (!tagDoc[key].isNull())
-    return tagDoc[key]["file"].as<const char *>();
-  return nullptr;
+  if (tagDoc[key].isNull()) return info;
+
+  info.file   = tagDoc[key]["file"].as<const char *>();
+  info.img    = tagDoc[key]["img"].as<const char *>();
+  info.title  = tagDoc[key]["title"].as<const char *>();
+  info.artist = tagDoc[key]["artist"].as<const char *>();
+  info.album  = tagDoc[key]["album"].as<const char *>();
+  return info;
 }
