@@ -11,18 +11,18 @@ RFID-driven audio player. Scan an NFC tag → lookup UID in `tags.json` on SD ca
 | GPIO | Function          | Notes                                    |
 |------|-------------------|------------------------------------------|
 | 4    | SD_CS             | Onboard microSD slot                     |
-| 5    | TFT_CS            | Display chip select                      |
-| 13   | TFT_BL            | Display backlight                        |
-| 14   | TFT_RST           | Display reset                            |
+| 14   | TFT_CS            | Display chip select (on-board TFT port)  |
 | 18   | SCK (VSPI)        | Shared: TFT SCL + SD_SCK                 |
 | 19   | MISO (VSPI)       | SD only (ST7735S is write-only)          |
-| 21   | TFT_DC            | Display data/command                     |
 | 23   | MOSI (VSPI)       | Shared: TFT SDA + SD_MOSI                |
+| 27   | TFT_DC            | Display data/command (on-board TFT port) |
+| 32   | TFT_BL            | Display backlight (on-board TFT port)    |
+| 33   | TFT_RST           | Display reset (on-board TFT port)        |
+| 13   | PN532_RX (ESP TX) | ESP32 TX → PN532 RX                     |
+| 22   | PN532_TX (ESP RX) | PN532 TX → ESP32 GPIO 22 (UART2 RX)     |
+| 21   | I2S_BCLK          | MAX98357A BCLK                           |
 | 25   | I2S_DOUT          | MAX98357A DIN                            |
 | 26   | I2S_LRC           | MAX98357A LRC                            |
-| 27   | I2S_BCLK          | MAX98357A BCLK                           |
-| 32   | PN532_TX (ESP RX) | Crossed: PN532 TX → ESP32 GPIO 32 (RX)   |
-| 33   | PN532_RX (ESP TX) | Crossed: ESP32 GPIO 33 (TX) → PN532 RX   |
 | 2    | ENC_CLK           | Rotary encoder (KY-040, not yet wired)   |
 | 15   | ENC_DT            | Rotary encoder direction                 |
 | 34   | ENC_SW            | Rotary encoder button (input-only)       |

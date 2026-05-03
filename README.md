@@ -30,8 +30,8 @@ Set the PN532's DIP switches to HSU mode (SEL0 = 0, SEL1 = 0). Note that TX on o
 
 | PN532 pin | ESP32 GPIO     |
 |-----------|----------------|
-| TX        | 33 (ESP32 RX)  |
-| RX        | 32 (ESP32 TX)  |
+| TX        | 22 (ESP32 RX)  |
+| RX        | 13 (ESP32 TX)  |
 | VCC       | 3V3            |
 | GND       | GND            |
 
@@ -39,24 +39,24 @@ Set the PN532's DIP switches to HSU mode (SEL0 = 0, SEL1 = 0). Note that TX on o
 
 | MAX98357A pin | ESP32 GPIO |
 |---------------|------------|
-| BCLK          | 27         |
+| BCLK          | 21         |
 | LRC           | 26         |
 | DIN           | 25         |
 | Vin           | 5V (VUSB)  |
 | GND           | GND        |
 
-### TFT display (SPI)
+### TFT display (SPI, on-board TFT port)
 
-The ST7735S display uses standard SPI. It shares the VSPI bus with the onboard microSD card — both use Arduino's bare-metal SPI (same `_spi_bus_array`), separated by their CS pins.
+The ST7735S display connects via the D32 Pro's on-board 10-pin SH 1.0 TFT port. It shares the VSPI bus with the onboard microSD card — both use Arduino's bare-metal SPI (same `_spi_bus_array`), separated by their CS pins.
 
 | TFT pin | ESP32 GPIO | Notes                         |
 |---------|------------|-------------------------------|
 | SDA     | 23         | MOSI, shared with SD_MOSI     |
 | SCL     | 18         | SCK, shared with SD_SCK       |
-| CS      | 5          |                               |
-| DC      | 21         | Data/Command                  |
-| RST     | 14         |                               |
-| BLK     | 13         | Backlight                     |
+| CS      | 14         |                               |
+| DC      | 27         | Data/Command                  |
+| RST     | 33         |                               |
+| BLK     | 32         | Backlight                     |
 | VDD     | 3.3V       |                               |
 | GND     | GND        |                               |
 
