@@ -104,8 +104,8 @@ Unknown tags are logged over serial and displayed on screen. The tag must be rem
 
 ```json
 {
-  "810C2B07": { "file": "music/sample-12s.wav" },
-  "52F41307": { "file": "music/gc_22k.wav" }
+  "81:0C:2B:07": { "file": "music/sample-12s.wav" },
+  "52:F4:13:07": { "file": "music/gc_22k.wav" }
 }
 ```
 

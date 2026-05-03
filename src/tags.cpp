@@ -22,17 +22,9 @@ void uidToStr(const uint8_t *uid, uint8_t len, char *buf) {
   buf[pos] = '\0';
 }
 
-void uidToStrCompact(const uint8_t *uid, uint8_t len, char *buf) {
-  for (uint8_t i = 0; i < len; i++) {
-    buf[i * 2]     = "0123456789ABCDEF"[uid[i] >> 4];
-    buf[i * 2 + 1] = "0123456789ABCDEF"[uid[i] & 0x0F];
-  }
-  buf[len * 2] = '\0';
-}
-
 const char *lookupTag(const uint8_t *uid, uint8_t uidLen) {
   char key[32];
-  uidToStrCompact(uid, uidLen, key);
+  uidToStr(uid, uidLen, key);
   if (!tagDoc[key].isNull())
     return tagDoc[key]["file"].as<const char *>();
   return nullptr;

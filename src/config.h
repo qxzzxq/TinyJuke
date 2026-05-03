@@ -40,6 +40,9 @@
 #define ENC_DT   15
 #define ENC_SW   34
 
+// --- Audio ---
+#define VOLUME_PCT 50   // 0–100, applied to 16-bit PCM samples
+
 // --- Colors (RGB565) ---
 #define C_BG        0x2104
 #define C_TEXT      0xFFFF

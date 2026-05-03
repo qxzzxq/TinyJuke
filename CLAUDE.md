@@ -100,7 +100,7 @@ WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, d
 4. Poll NFC for tag removal every ~150ms (3 consecutive misses → stop)
 5. Teardown I2S on exit
 
-**UID matching:** `uidToStrCompact()` produces hex without colons (`04A224B2C38081`) to match keys in `tags.json`. `lookupTag()` uses ArduinoJson's `tagDoc[key].isNull()` check.
+**UID matching:** `uidToStr()` produces colon-separated hex (`04:A2:24:B2:C3:80:81`) to match keys in `tags.json`. `lookupTag()` uses ArduinoJson's `tagDoc[key].isNull()` check.
 
 ## SD card layout
 
@@ -115,8 +115,8 @@ WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, d
 `tags.json` format:
 ```json
 {
-  "810C2B07": { "file": "music/sample-12s.wav" },
-  "52F41307": { "file": "music/gc_22k.wav" }
+  "81:0C:2B:07": { "file": "music/sample-12s.wav" },
+  "52:F4:13:07": { "file": "music/gc_22k.wav" }
 }
 ```
 

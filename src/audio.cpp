@@ -134,6 +134,15 @@ void playWav(const char *filepath, PN532 &nfc) {
     size_t bytesRead = f.read(buf, toRead);
     if (bytesRead == 0) break;
 
+    // Apply volume scaling to 16-bit samples
+    if (hdr.bitsPerSample == 16) {
+      int16_t *samples = (int16_t *)buf;
+      size_t count = bytesRead / 2;
+      float scale = VOLUME_PCT / 100.0f;
+      for (size_t i = 0; i < count; i++)
+        samples[i] = (int16_t)(samples[i] * scale);
+    }
+
     size_t bytesWritten;
     if (i2s_write(I2S_NUM_0, buf, bytesRead, &bytesWritten, pdMS_TO_TICKS(100)) != ESP_OK)
       break;
