@@ -41,11 +41,19 @@
 #define ENC_SW   34
 
 // --- Audio ---
-#define VOLUME_PCT 50   // 0–100, applied to 16-bit PCM samples
+#define VOLUME_DEFAULT 25   // 0–100, default on boot
+#define VOLUME_MAX     100
 
-// --- Colors (RGB565) ---
-#define C_BG        0x2104
-#define C_TEXT      0xFFFF
-#define C_ACCENT    0x07E0
-#define C_DIM       0x8410
-#define C_RED       0xF800
+// --- Web server ---
+#define WIFI_SSID     "Jukebox-Setup"
+#define WIFI_PASSWORD "12345678"
+
+// --- Colors (RGB565, dark modern theme) ---
+#define C_BG        0x0865   // #0A0E1A — very dark navy
+#define C_SURFACE   0x10C7   // #111A2E — slightly lighter surface
+#define C_TEXT      0xFFFF   // #FFFFFF — white
+#define C_MUTED     0x6B4D   // #6B7B8D — muted blue-gray
+#define C_ACCENT    0x46F2   // #4ADE80 — vibrant green
+#define C_DIM       0x4228   // #455A6E — dim secondary
+#define C_RED       0xF9A6   // #F87171 — soft red
+#define C_LINE      0x2169   // #1E293B — subtle divider

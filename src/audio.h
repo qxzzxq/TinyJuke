@@ -1,6 +1,7 @@
 #pragma once
 
 #include "config.h"
+#include "encoder.h"  // for volumeLevel
 #include <SD.h>
 #include <PN532.h>
 

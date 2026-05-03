@@ -3,13 +3,16 @@
 // TFT (ST7735S, 128x160) and SD card share the VSPI bus (GPIO 18/19/23).
 // Arduino_ESP32SPI and the SD library both use bare-metal SPI — only one CS
 // is active at a time.
+//
+// Jukebox mode: scan tag → play WAV, encoder adjusts volume, hold for menu.
+// Menu mode: manage tags, start web server, adjust volume.
 
 #include "config.h"
 #include "tags.h"
 #include "screen.h"
 #include "audio.h"
 #include "encoder.h"
-#include "web.h"
+#include "gui.h"
 
 #include <PN532_HSU.h>
 #include <PN532.h>
@@ -34,12 +37,12 @@ void setup() {
   delay(200);
   Serial.println("\nESP Jukebox starting...");
 
-  // 1. Init TFT (initializes VSPI via bare-metal SPI)
+  // 1. Init TFT
   pinMode(TFT_BL, OUTPUT);
   digitalWrite(TFT_BL, HIGH);
   gfx.begin();
 
-  // 2. Init SD (VSPI reconfigures for each device via CS)
+  // 2. Init SD
   Serial.print("Mounting SD... ");
   if (SD.begin(SD_CS)) {
     sdReady = true;
@@ -83,11 +86,10 @@ void setup() {
     Serial.println("PN532 not found.");
     if (sdReady) {
       gfx.fillScreen(C_BG);
-      gfx.setTextColor(C_RED);
-      gfx.setTextSize(2);
-      gfx.setCursor(10, 50); gfx.print("PN532");
+      gfx.setTextColor(C_RED);  gfx.setTextSize(2);
+      gfx.setCursor(30, 40); gfx.print("PN532");
       gfx.setTextSize(1);
-      gfx.setCursor(10, 80); gfx.print("NOT FOUND");
+      gfx.setCursor(30, 65); gfx.print("NOT FOUND");
     }
     const uint8_t wake[] = {0x55, 0x55, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
@@ -114,20 +116,54 @@ void setup() {
   nfc.SAMConfig();
   Serial.println("Ready.");
 
-  // 5. Init encoder (placeholder)
+  // 5. Init encoder (loads saved volume, sets up interrupts)
   initEncoder();
-
-  // 6. Web server disabled until encoder is wired.
-  //    Will be triggered by encoder long-press to enter admin mode.
-  // initWebServer();
 }
 
 // ================================================================
 
 void loop() {
+  // --- Management mode ---
+  if (guiActive()) {
+    guiLoop();
+    return;
+  }
+
+  // --- Jukebox mode: handle encoder for volume / menu entry ---
+  int ev = readEncoder();
+
+  if (ev == ENC_CW && volumeLevel < 100) {
+    volumeLevel++;
+    if (audioPlaying) {
+      // Show volume popup briefly (simplified: draw at bottom of current screen)
+      gfx.fillRect(38, 140, 52, 20, C_BG);
+      gfx.setTextColor(C_ACCENT); gfx.setTextSize(1);
+      gfx.setCursor(40, 148);
+      gfx.print("vol "); gfx.print(volumeLevel); gfx.print("%");
+    }
+  }
+  if (ev == ENC_CCW && volumeLevel > 0) {
+    volumeLevel--;
+    if (audioPlaying) {
+      gfx.fillRect(38, 140, 52, 20, C_BG);
+      gfx.setTextColor(C_ACCENT); gfx.setTextSize(1);
+      gfx.setCursor(40, 148);
+      gfx.print("vol "); gfx.print(volumeLevel); gfx.print("%");
+    }
+  }
+  if (ev == ENC_CLICK) {
+    // Save volume on click when in jukebox mode
+    saveVolume();
+  }
+  if (ev == ENC_HOLD) {
+    saveVolume();
+    guiEnter();
+    return;
+  }
+
+  // --- NFC tag polling ---
   uint8_t uid[7] = {0};
   uint8_t uidLength = 0;
-
   bool found = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, 300);
 
   if (found && !tagPresent) {
@@ -145,6 +181,42 @@ void loop() {
       } else {
         Serial.println("Unknown tag.");
         drawUnknownTagScreen(uid, uidLength);
+        // Wait for encoder click to link or hold to dismiss
+        uint32_t t = millis();
+        while (millis() - t < 10000) { // 10s timeout
+          int eu = readEncoder();
+          if (eu == ENC_CLICK) {
+            // Enter management mode to link this tag
+            char key[32];
+            // Build UID string
+            uint8_t pos = 0;
+            for (uint8_t i = 0; i < uidLength; i++) {
+              if (uid[i] < 0x10) key[pos++] = '0';
+              else key[pos++] = "0123456789ABCDEF"[(uid[i] >> 4) & 0x0F];
+              key[pos++] = "0123456789ABCDEF"[uid[i] & 0x0F];
+              if (i < uidLength - 1) key[pos++] = ':';
+            }
+            key[pos] = '\0';
+            Serial.printf("Linking unknown tag %s\n", key);
+            guiEnter();
+            // Pre-fill: go directly to file browser for linking
+            // (guiEnter starts at MENU, user can navigate to Manage Tags)
+            break;
+          }
+          if (eu == ENC_HOLD) {
+            break; // dismiss
+          }
+          // Also check for tag removal
+          uint8_t u[7]; uint8_t uLen;
+          if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 200)) {
+            tagPresent = false;
+            Serial.println("Tag removed.");
+            drawWaitingScreen();
+            break;
+          }
+          delay(30);
+        }
+        if (tagPresent) drawWaitingScreen();
       }
     } else {
       drawTagScreen(uid, uidLength);

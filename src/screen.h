@@ -11,3 +11,11 @@ void drawTagScreen(const uint8_t *uid, uint8_t uidLen);
 void drawUnknownTagScreen(const uint8_t *uid, uint8_t uidLen);
 void drawNowPlayingScreen(const char *filepath);
 void drawSDErrorScreen();
+
+// GUI screens
+void drawMenuScreen(int selected);
+void drawFileBrowser(const char *files[], int count, int selected);
+void drawLinkScreen(const char *filename);
+void drawLinkSuccess(const char *uid, const char *filename);
+void drawVolumeScreen(int level);
+void drawWebServerScreen();

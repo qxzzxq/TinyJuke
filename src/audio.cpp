@@ -138,7 +138,7 @@ void playWav(const char *filepath, PN532 &nfc) {
     if (hdr.bitsPerSample == 16) {
       int16_t *samples = (int16_t *)buf;
       size_t count = bytesRead / 2;
-      float scale = VOLUME_PCT / 100.0f;
+      float scale = volumeLevel / 100.0f;
       for (size_t i = 0; i < count; i++)
         samples[i] = (int16_t)(samples[i] * scale);
     }
