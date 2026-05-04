@@ -126,10 +126,54 @@ bool guiActive() {
 void guiLoop() {
   if (!active) return;
 
+  // --- Continuous processing (runs regardless of encoder events) ---
+
+  // LINK screen: always poll for a tag
+  if (scr == Screen::LINK) {
+    uint8_t uid[7];
+    uint8_t uidLen;
+    bool found = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLen, 100);
+    if (found) {
+      char buf[32];
+      uint8_t pos = 0;
+      for (uint8_t i = 0; i < uidLen; i++) {
+        if (uid[i] < 0x10) buf[pos++] = '0';
+        else buf[pos++] = "0123456789ABCDEF"[(uid[i] >> 4) & 0x0F];
+        buf[pos++] = "0123456789ABCDEF"[uid[i] & 0x0F];
+        if (i < uidLen - 1) buf[pos++] = ':';
+      }
+      buf[pos] = '\0';
+      strncpy(linkUID, buf, 31);
+      linkUID[31] = '\0';
+
+      tagDoc[buf]["file"] = linkFile;
+      saveTagDoc();
+
+      scr = Screen::LINK_OK;
+      linkDismiss = millis() + 3000;
+      redraw();
+      return;
+    }
+  }
+
+  // LINK_OK screen: auto-dismiss after timeout
+  if (scr == Screen::LINK_OK && millis() > linkDismiss) {
+    scr = Screen::FILES;
+    scanFiles();
+    redraw();
+    return;
+  }
+
+  // WEB screen: always service HTTP requests
+  if (scr == Screen::WEB && webRunning) {
+    handleWebClient();
+  }
+
+  // --- Encoder events ---
   int ev = readEncoder();
   if (ev == ENC_NONE) return;
 
-  // --- Global: HOLD = back / cancel ---
+  // --- HOLD = back / cancel (always full redraw) ---
   if (ev == ENC_HOLD) {
     switch (scr) {
       case Screen::MENU:
@@ -149,7 +193,6 @@ void guiLoop() {
         scr = Screen::MENU; menuSel = 2;
         break;
       case Screen::WEB:
-        // Stop web server, return to menu
         WiFi.softAPdisconnect(true);
         webRunning = false;
         scr = Screen::MENU; menuSel = 1;
@@ -165,115 +208,82 @@ void guiLoop() {
     // ================ MENU ================
     case Screen::MENU:
       if (ev == ENC_CW) {
+        int prev = menuSel;
         menuSel = (menuSel + 1) % 3;
+        updateMenuSelection(prev, menuSel);
       } else if (ev == ENC_CCW) {
+        int prev = menuSel;
         menuSel = (menuSel + 2) % 3;
+        updateMenuSelection(prev, menuSel);
       } else if (ev == ENC_CLICK) {
         switch (menuSel) {
-          case 0: // Manage Tags
-            scanFiles();
-            fileSel = 0;
-            scr = Screen::FILES;
-            break;
-          case 1: // Web Server
-            initWebServer();
-            webRunning = true;
-            scr = Screen::WEB;
-            break;
-          case 2: // Volume
-            scr = Screen::VOLUME;
-            break;
+          case 0: scanFiles(); fileSel = 0; scr = Screen::FILES; break;
+          case 1: initWebServer(); webRunning = true; scr = Screen::WEB; break;
+          case 2: scr = Screen::VOLUME; break;
         }
+        redraw();
       }
-      redraw();
       break;
 
     // ================ FILES ================
     case Screen::FILES:
       if (fileCount == 0) {
+        if (ev == ENC_HOLD) { scr = Screen::MENU; menuSel = 0; }
         redraw();
         break;
       }
       if (ev == ENC_CW) {
+        int prev = fileSel;
         fileSel = (fileSel + 1) % fileCount;
+        updateFileSelection(prev, fileSel, (const char **)files, fileCount);
       } else if (ev == ENC_CCW) {
+        int prev = fileSel;
         fileSel = (fileSel + fileCount - 1) % fileCount;
+        updateFileSelection(prev, fileSel, (const char **)files, fileCount);
       } else if (ev == ENC_CLICK) {
-        // Enter link mode
         strncpy(linkFile, files[fileSel], 63);
         linkFile[63] = '\0';
         scr = Screen::LINK;
+        redraw();
       }
-      redraw();
       break;
 
-    // ================ LINK ================
-    case Screen::LINK: {
-      // Poll NFC for a tag to link
-      uint8_t uid[7];
-      uint8_t uidLen;
-      bool found = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLen, 100);
-
-      if (found) {
-        char buf[32];
-        // Build colon-separated UID string
-        uint8_t pos = 0;
-        for (uint8_t i = 0; i < uidLen; i++) {
-          if (uid[i] < 0x10) buf[pos++] = '0';
-          else buf[pos++] = "0123456789ABCDEF"[(uid[i] >> 4) & 0x0F];
-          buf[pos++] = "0123456789ABCDEF"[uid[i] & 0x0F];
-          if (i < uidLen - 1) buf[pos++] = ':';
-        }
-        buf[pos] = '\0';
-
-        // Store the UID for success screen
-        strncpy(linkUID, buf, 31);
-        linkUID[31] = '\0';
-
-        // Check if already mapped
-        if (!tagDoc[buf].isNull()) {
-          // Already mapped — will show it on success screen
-        }
-
-        // Create or update the mapping
-        tagDoc[buf]["file"] = linkFile;
-        saveTagDoc();
-
-        scr = Screen::LINK_OK;
-        linkDismiss = millis() + 3000;
-      }
-      redraw();
+    // ================ LINK (encoder events ignored — NFC polled above) ================
+    case Screen::LINK:
       break;
-    }
 
-    // ================ LINK_OK ================
+    // ================ LINK_OK (click to dismiss early) ================
     case Screen::LINK_OK:
-      if (ev == ENC_CLICK || millis() > linkDismiss) {
+      if (ev == ENC_CLICK) {
         scr = Screen::FILES;
         scanFiles();
+        redraw();
       }
-      redraw();
       break;
 
     // ================ VOLUME ================
     case Screen::VOLUME:
       if (ev == ENC_CW && volumeLevel < 100) {
         volumeLevel++;
+        updateVolumeDisplay(volumeLevel);
       } else if (ev == ENC_CCW && volumeLevel > 0) {
         volumeLevel--;
+        updateVolumeDisplay(volumeLevel);
       } else if (ev == ENC_CLICK) {
         saveVolume();
         scr = Screen::MENU; menuSel = 2;
+        redraw();
       }
-      redraw();
       break;
 
-    // ================ WEB ================
+    // ================ WEB (encoder only used for HOLD/CLICK — HTTP serviced above) ================
     case Screen::WEB:
-      if (webRunning) {
-        handleWebClient();  // service HTTP requests
+      if (ev == ENC_CLICK) {
+        WiFi.softAPdisconnect(true);
+        webRunning = false;
+        scr = Screen::MENU; menuSel = 1;
+        redraw();
       }
-      // CLICK handled above
       break;
   }
 }

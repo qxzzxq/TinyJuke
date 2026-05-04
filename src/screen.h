@@ -20,3 +20,8 @@ void drawLinkScreen(const char *filename);
 void drawLinkSuccess(const char *uid, const char *filename);
 void drawVolumeScreen(int level);
 void drawWebServerScreen();
+
+// Incremental updates — only redraw changed items (no flicker)
+void updateMenuSelection(int oldSel, int newSel);
+void updateFileSelection(int oldSel, int newSel, const char *files[], int count);
+void updateVolumeDisplay(int level);

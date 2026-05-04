@@ -388,6 +388,108 @@ void drawVolumeScreen(int level) {
 //  Web server screen
 // ================================================================
 
+// ================================================================
+//  Incremental screen updates — only redraw changed items
+//  No fillScreen() → no flicker on encoder rotation.
+// ================================================================
+
+void updateMenuSelection(int oldSel, int newSel) {
+  const int startY = 36, itemH = 28;
+
+  // Deselect old
+  int yo = startY + oldSel * itemH;
+  gfx.fillRect(6, yo - 1, 116, itemH - 2, C_BG);
+  gfx.setTextColor(C_TEXT);
+  gfx.setTextSize(1);
+  gfx.setCursor(14, yo + (itemH - 8) / 2);
+  gfx.print(MENU_ITEMS[oldSel]);
+
+  // Select new
+  int yn = startY + newSel * itemH;
+  gfx.fillRect(6, yn - 1, 116, itemH - 2, C_SURFACE);
+  gfx.setTextColor(C_ACCENT);
+  gfx.setTextSize(1);
+  gfx.setCursor(14, yn + (itemH - 8) / 2);
+  gfx.print(MENU_ITEMS[newSel]);
+  gfx.setCursor(116, yn + (itemH - 8) / 2);
+  gfx.print(">");
+}
+
+void updateFileSelection(int oldSel, int newSel, const char *files[], int count) {
+  if (count == 0) return;
+
+  auto topFor = [count](int sel) {
+    int t = sel - 1;
+    if (t < 0) t = 0;
+    if (t + MAX_VISIBLE_FILES > count) t = count - MAX_VISIBLE_FILES;
+    if (t < 0) t = 0;
+    return t;
+  };
+
+  int oldTop = topFor(oldSel);
+  int newTop = topFor(newSel);
+
+  const int startY = 32, itemH = 24;
+
+  auto drawOne = [startY, itemH, files](int idx, int top, bool sel) {
+    int y = startY + (idx - top) * itemH;
+    gfx.fillRect(6, y - 1, 116, itemH - 2, sel ? C_SURFACE : C_BG);
+
+    const char *name = trimFilename(files[idx]);
+    char line[22];
+    if (textWidth(name) > 110) {
+      strncpy(line, name, 18); line[18] = '\0'; strcat(line, "...");
+    } else {
+      strncpy(line, name, sizeof(line) - 1); line[sizeof(line) - 1] = '\0';
+    }
+
+    gfx.setTextColor(sel ? C_ACCENT : C_TEXT);
+    gfx.setTextSize(1);
+    gfx.setCursor(14, y + (itemH - 8) / 2);
+    gfx.print(line);
+    if (sel) {
+      gfx.setCursor(116, y + (itemH - 8) / 2);
+      gfx.print(">");
+    }
+  };
+
+  if (oldTop == newTop) {
+    // Same visible window — just swap two items
+    drawOne(oldSel, oldTop, false);
+    drawOne(newSel, newTop, true);
+  } else {
+    // Window scrolled — redraw all visible items
+    gfx.fillRect(0, 22, 128, 126, C_BG);
+    for (int i = 0; i < MAX_VISIBLE_FILES && (newTop + i) < count; i++)
+      drawOne(newTop + i, newTop, (newTop + i) == newSel);
+  }
+
+  // Update scrollbar
+  if (count > MAX_VISIBLE_FILES) {
+    gfx.fillRect(124, startY, 2, MAX_VISIBLE_FILES * itemH, C_BG);
+    int barH = (MAX_VISIBLE_FILES * 100) / count;
+    int barY = startY + (newTop * (MAX_VISIBLE_FILES * itemH)) / count;
+    gfx.fillRect(124, barY, 2, barH, C_MUTED);
+  }
+}
+
+void updateVolumeDisplay(int level) {
+  const int barX = 14, barY = 70, barW = 100, barH = 14;
+
+  // Redraw bar
+  gfx.fillRect(barX, barY, barW, barH, C_BG);
+  gfx.fillRoundRect(barX, barY, barW, barH, 4, C_LINE);
+  int fillW = (barW - 4) * level / 100;
+  if (fillW > 0)
+    gfx.fillRoundRect(barX + 2, barY + 2, fillW, barH - 4, 3, C_ACCENT);
+
+  // Redraw percentage
+  gfx.fillRect(0, 92, 128, 20, C_BG);
+  char pct[8];
+  snprintf(pct, sizeof(pct), "%d%%", level);
+  centerText(pct, 100, C_TEXT, 2);
+}
+
 void drawWebServerScreen() {
   gfx.fillScreen(C_BG);
   centerText("Web Server", 18, C_ACCENT, 2);
