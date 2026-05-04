@@ -141,12 +141,6 @@ void loop() {
       if (next < 0 || next > 100) break;
       volumeLevel = next;
     }
-    if (audioPlaying) {
-      gfx.fillRect(38, 140, 52, 20, C_BG);
-      gfx.setTextColor(C_ACCENT); gfx.setTextSize(1);
-      gfx.setCursor(40, 148);
-      gfx.print("vol "); gfx.print(volumeLevel); gfx.print("%");
-    }
   }
   if (ev == ENC_CLICK) {
     // Save volume on click when in jukebox mode

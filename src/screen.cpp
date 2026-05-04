@@ -52,6 +52,12 @@ static const char *trimFilename(const char *path) {
 //  Jukebox screens
 // ================================================================
 
+// Saved bottom-section state for restoring after volume overlay
+static bool s_hasImg          = false;
+static char s_botTitle[48]    = "";
+static char s_botSub[64]      = "";
+static int  s_playbackVolDrawn = -1;
+
 void drawWaitingScreen() {
   gfx.fillScreen(C_BG);
   centerText("Jukebox", 40, C_TEXT, 2);
@@ -138,6 +144,10 @@ static void scaleTo128(const uint16_t *src, int srcW, int srcH, uint16_t *dst) {
 }
 
 void drawNowPlayingScreen(const TagInfo &tag) {
+  // Reset volume overlay state so the next encoder rotation
+  // does a full first draw for the new song.
+  s_playbackVolDrawn = -1;
+
   // ---- load image ----
   uint16_t *rawBmp = nullptr;
   uint16_t *scaled = (uint16_t *)malloc(128 * 128 * 2);
@@ -197,17 +207,24 @@ void drawNowPlayingScreen(const TagInfo &tag) {
     if (tw > 122) {
       strncpy(buf, line1, 19); buf[19] = '\0'; strcat(buf, "...");
       centerText(buf, 132, C_TEXT, 1);
+      strncpy(s_botTitle, buf, sizeof(s_botTitle) - 1);
     } else {
       centerText(line1, 132, C_TEXT, 1);
+      strncpy(s_botTitle, line1, sizeof(s_botTitle) - 1);
     }
 
     if (artist) {
       if (album) snprintf(buf, sizeof(buf), "%s  \267  %s", artist, album);
       else snprintf(buf, sizeof(buf), "%s", artist);
       centerText(buf, 146, C_MUTED, 1);
+      strncpy(s_botSub, buf, sizeof(s_botSub) - 1);
     } else if (album) {
       centerText(album, 146, C_MUTED, 1);
+      strncpy(s_botSub, album, sizeof(s_botSub) - 1);
+    } else {
+      s_botSub[0] = '\0';
     }
+    s_hasImg = true;
   } else {
     // Text-only layout
     if (title) {
@@ -227,6 +244,7 @@ void drawNowPlayingScreen(const TagInfo &tag) {
       }
     }
     drawHintBar("remove tag to stop");
+    s_hasImg = false;
   }
 
   if (scaled) free(scaled);
@@ -295,6 +313,63 @@ void drawVolumeScreen(int level) {
 // ================================================================
 //  Web server screen
 // ================================================================
+
+// ================================================================
+//  Playback volume overlay — replaces the bottom text section (y=128–159)
+//  during playback. Uses incremental updates to avoid flicker.
+//  On clear, the bottom section is redrawn from saved state.
+// ================================================================
+
+// Redraw just the bottom text section (y=128–159) from saved state.
+// Called by clearPlaybackVolumeOverlay after the 5-second timeout.
+static void redrawNowPlayingBottom() {
+  if (s_hasImg) {
+    gfx.fillRect(0, 128, 128, 32, C_SURFACE);
+    gfx.fillRect(0, 128, 128, 1, C_ACCENT);
+
+    if (s_botTitle[0])
+      centerText(s_botTitle, 132, C_TEXT, 1);
+
+    if (s_botSub[0])
+      centerText(s_botSub, 146, C_MUTED, 1);
+  } else {
+    drawHintBar("remove tag to stop");
+  }
+}
+
+void drawPlaybackVolumeOverlay(int level) {
+  const int barX = 28, barY = 141, barW = 94, barH = 8;
+
+  if (s_playbackVolDrawn < 0) {
+    // Replace the bottom text section (y=128–159)
+    gfx.fillRect(0, 128, 128, 32, C_SURFACE);
+    gfx.fillRect(0, 128, 128, 1, C_ACCENT);
+
+    gfx.setTextColor(C_TEXT);
+    gfx.setTextSize(1);
+    gfx.setCursor(6, 142);
+    gfx.print("VOL");
+
+    gfx.drawRect(barX - 1, barY - 1, barW + 2, barH + 2, C_LINE);
+  }
+
+  // Incremental bar fill
+  int innerW = barW - 4;
+  int fillW  = innerW * level / 100;
+  int prevFillW = (s_playbackVolDrawn >= 0) ? innerW * s_playbackVolDrawn / 100 : 0;
+
+  if (fillW < prevFillW)
+    gfx.fillRect(barX + 2 + fillW, barY + 2, prevFillW - fillW, barH - 4, C_SURFACE);
+  else if (fillW > prevFillW)
+    gfx.fillRect(barX + 2 + prevFillW, barY + 2, fillW - prevFillW, barH - 4, C_ACCENT);
+
+  s_playbackVolDrawn = level;
+}
+
+void clearPlaybackVolumeOverlay() {
+  s_playbackVolDrawn = -1;
+  redrawNowPlayingBottom();
+}
 
 // ================================================================
 //  Incremental screen updates — only redraw changed items

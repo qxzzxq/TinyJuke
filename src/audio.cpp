@@ -1,5 +1,6 @@
 #include "audio.h"
 #include "web.h"
+#include "screen.h"
 #include <driver/i2s.h>
 
 bool audioPlaying = false;
@@ -130,6 +131,9 @@ void playWav(const char *filepath, PN532 &nfc) {
   uint32_t lastNfcCheck = 0;
   uint8_t  tagAbsentCount = 0;
 
+  uint32_t volOverlayTimer = 0;
+  bool     volOverlayVisible = false;
+
   while (remaining > 0 && !stopRequested) {
     size_t toRead = (remaining < CHUNK) ? (size_t)remaining : CHUNK;
     size_t bytesRead = f.read(buf, toRead);
@@ -150,6 +154,27 @@ void playWav(const char *filepath, PN532 &nfc) {
     remaining -= bytesRead;
 
     handleWebClient();
+
+    // --- Encoder: volume adjustment during playback ---
+    int enc = readEncoder();
+    if ((enc > 0 && enc < ENC_CLICK) || (enc < 0)) {
+      int steps = (enc > 0) ? enc : -enc;
+      int delta = (enc > 0) ? 1 : -1;
+      while (steps-- > 0) {
+        int next = volumeLevel + delta;
+        if (next < 0 || next > 100) break;
+        volumeLevel = next;
+      }
+      drawPlaybackVolumeOverlay(volumeLevel);
+      volOverlayTimer   = millis();
+      volOverlayVisible = true;
+    } else if (enc == ENC_CLICK) {
+      saveVolume();
+    }
+    if (volOverlayVisible && millis() - volOverlayTimer >= 5000) {
+      clearPlaybackVolumeOverlay();
+      volOverlayVisible = false;
+    }
 
     if (millis() - lastNfcCheck >= 150) {
       lastNfcCheck = millis();
