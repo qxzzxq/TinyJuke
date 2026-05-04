@@ -44,7 +44,11 @@ static void IRAM_ATTR encISR() {
 }
 
 // --- Button debounce (polled) ---
-enum { IDLE, MAYBE, PRESSED, HOLD } static btnState = IDLE;
+//
+// State machine waits for release to decide click vs hold:
+//   IDLE → MAYBE → ARMED → release → ENC_CLICK
+//                       → 600ms   → ENC_HOLD → release → IDLE (silent)
+enum { IDLE, MAYBE, ARMED, HOLD } static btnState = IDLE;
 static uint32_t btnTimer = 0;
 
 void initEncoder() {
@@ -87,20 +91,20 @@ int readEncoder() {
     if (raw) { btnTimer = now; btnState = MAYBE; }
     break;
   case MAYBE:
-    if (!raw) { btnState = IDLE; break; }
-    if (now - btnTimer < 30) break;
-    btnState = PRESSED;
-    btnTimer = now;
-    return ENC_CLICK;
-  case PRESSED:
-    if (!raw) { btnState = IDLE; break; }
-    if (now - btnTimer > 600) {
+    if (!raw) { btnState = IDLE; break; }          // bounce
+    if (now - btnTimer < 30) break;                 // debounce window
+    btnState = ARMED;
+    btnTimer = now;                                  // reset timer for hold detection
+    break;
+  case ARMED:
+    if (!raw) { btnState = IDLE; return ENC_CLICK; } // short press → click
+    if (now - btnTimer > 600) {                       // long press → hold
       btnState = HOLD;
       return ENC_HOLD;
     }
     break;
   case HOLD:
-    if (!raw) { btnState = IDLE; break; }
+    if (!raw) { btnState = IDLE; break; }            // release after hold (silent)
     break;
   }
   return ENC_NONE;

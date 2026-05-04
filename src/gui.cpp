@@ -177,6 +177,7 @@ void guiLoop() {
   if (ev == ENC_HOLD) {
     switch (scr) {
       case Screen::MENU:
+        drawWaitingScreen();
         active = false;  // exit management mode
         return;
       case Screen::FILES:
