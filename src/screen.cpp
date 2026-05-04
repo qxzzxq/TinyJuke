@@ -475,16 +475,16 @@ void updateFileSelection(int oldSel, int newSel, const char *files[], int count)
 
 void updateVolumeDisplay(int level) {
   const int barX = 14, barY = 70, barW = 100, barH = 14;
-
-  // Redraw bar
-  gfx.fillRect(barX, barY, barW, barH, C_BG);
-  gfx.fillRoundRect(barX, barY, barW, barH, 4, C_LINE);
   int fillW = (barW - 4) * level / 100;
+
+  // Clear bar interior with track color (C_LINE) — no flash since it matches
+  // the track, which is already C_LINE.
+  gfx.fillRect(barX + 2, barY + 2, barW - 4, barH - 4, C_LINE);
   if (fillW > 0)
     gfx.fillRoundRect(barX + 2, barY + 2, fillW, barH - 4, 3, C_ACCENT);
 
-  // Redraw percentage
-  gfx.fillRect(0, 92, 128, 20, C_BG);
+  // Clear percentage text — size 2 = 16px tall, cursor y=100 → y=100..116
+  gfx.fillRect(0, 98, 128, 22, C_BG);
   char pct[8];
   snprintf(pct, sizeof(pct), "%d%%", level);
   centerText(pct, 100, C_TEXT, 2);
