@@ -159,9 +159,10 @@ void loop() {
   }
 
   // --- NFC tag polling ---
-  uint8_t uid[7] = {0};
+  uint8_t uid[10] = {0};
   uint8_t uidLength = 0;
   bool found = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, 300);
+  if (uidLength > 10) uidLength = 10;
 
   if (found && !tagPresent) {
     tagPresent = true;
@@ -178,39 +179,21 @@ void loop() {
       } else {
         Serial.println("Unknown tag.");
         drawUnknownTagScreen(uid, uidLength);
-        // Wait for encoder click to link or hold to dismiss
         uint32_t t = millis();
         while (millis() - t < 10000) { // 10s timeout
           int eu = readEncoder();
-          if (eu == ENC_CLICK) {
-            // Enter management mode to link this tag
-            char key[32];
-            // Build UID string
-            uint8_t pos = 0;
-            for (uint8_t i = 0; i < uidLength; i++) {
-              if (uid[i] < 0x10) key[pos++] = '0';
-              else key[pos++] = "0123456789ABCDEF"[(uid[i] >> 4) & 0x0F];
-              key[pos++] = "0123456789ABCDEF"[uid[i] & 0x0F];
-              if (i < uidLength - 1) key[pos++] = ':';
-            }
-            key[pos] = '\0';
-            Serial.printf("Linking unknown tag %s\n", key);
-            guiEnter();
-            // Pre-fill: go directly to file browser for linking
-            // (guiEnter starts at MENU, user can navigate to Manage Tags)
-            break;
-          }
-          if (eu == ENC_HOLD) {
+          if (eu == ENC_CLICK || eu == ENC_HOLD) {
             break; // dismiss
           }
           // Also check for tag removal
-          uint8_t u[7]; uint8_t uLen;
+          uint8_t u[10]; uint8_t uLen;
           if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 200)) {
             tagPresent = false;
             Serial.println("Tag removed.");
             drawWaitingScreen();
             break;
           }
+          if (uLen > 10) uLen = 10;
           delay(30);
         }
         if (tagPresent) drawWaitingScreen();

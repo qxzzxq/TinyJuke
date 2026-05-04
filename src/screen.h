@@ -15,14 +15,10 @@ void drawSDErrorScreen();
 
 // GUI screens
 void drawMenuScreen(int selected);
-void drawFileBrowser(const char *files[], int count, int selected);
-void drawLinkScreen(const char *filename);
-void drawLinkSuccess(const char *uid, const char *filename);
 void drawVolumeScreen(int level);
 void drawWebServerScreen(int connections);
 
 // Incremental updates — only redraw changed items (no flicker)
 void updateMenuSelection(int oldSel, int newSel);
-void updateFileSelection(int oldSel, int newSel, const char *files[], int count);
 void updateVolumeDisplay(int level);
 void updateWebConnectionCount(int connections);

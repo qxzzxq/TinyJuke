@@ -74,7 +74,7 @@ void drawUnknownTagScreen(const uint8_t *uid, uint8_t uidLen) {
   char uidStr[64];
   uidToStr(uid, uidLen, uidStr);
   centerText(uidStr, 65, C_TEXT, 1);
-  centerText("click to link", 100, C_ACCENT, 1);
+  centerText("click to dismiss", 100, C_ACCENT, 1);
   drawHintBar("hold to dismiss");
 }
 
@@ -242,13 +242,13 @@ void drawSDErrorScreen() {
 //  Menu screen
 // ================================================================
 
-static const char *MENU_ITEMS[] = { "Manage Tags", "Web Server", "Volume" };
+static const char *MENU_ITEMS[] = { "Web Server", "Volume" };
 
 void drawMenuScreen(int selected) {
   drawHeader("Menu", "back");
   const int startY = 36, itemH = 28;
 
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < 2; i++) {
     int y = startY + i * itemH;
     if (i == selected)
       gfx.fillRect(6, y - 1, 116, itemH - 2, C_SURFACE);
@@ -263,105 +263,6 @@ void drawMenuScreen(int selected) {
     }
   }
   drawHintBar("turn \267 click \267 hold");
-}
-
-// ================================================================
-//  File browser
-// ================================================================
-
-#define MAX_VISIBLE_FILES 4
-
-void drawFileBrowser(const char *files[], int count, int selected) {
-  drawHeader("Files", "back");
-  if (count == 0) {
-    centerText("No files", 80, C_MUTED, 1);
-    drawHintBar("hold to go back");
-    return;
-  }
-
-  int topIdx = selected - 1;
-  if (topIdx < 0) topIdx = 0;
-  if (topIdx + MAX_VISIBLE_FILES > count)
-    topIdx = count - MAX_VISIBLE_FILES;
-  if (topIdx < 0) topIdx = 0;
-
-  const int startY = 32, itemH = 24;
-
-  for (int i = 0; i < MAX_VISIBLE_FILES && (topIdx + i) < count; i++) {
-    int idx = topIdx + i;
-    int y = startY + i * itemH;
-
-    if (idx == selected)
-      gfx.fillRect(6, y - 1, 116, itemH - 2, C_SURFACE);
-
-    gfx.setTextColor(idx == selected ? C_ACCENT : C_TEXT);
-    gfx.setTextSize(1);
-
-    const char *name = trimFilename(files[idx]);
-    char line[22];
-    if (textWidth(name) > 110) {
-      strncpy(line, name, 18);
-      line[18] = '\0';
-      strcat(line, "...");
-    } else {
-      strncpy(line, name, sizeof(line) - 1);
-      line[sizeof(line) - 1] = '\0';
-    }
-    gfx.setCursor(14, y + (itemH - 8) / 2);
-    gfx.print(line);
-
-    if (idx == selected) {
-      gfx.setCursor(116, y + (itemH - 8) / 2);
-      gfx.print(">");
-    }
-  }
-
-  if (count > MAX_VISIBLE_FILES) {
-    int barH = (MAX_VISIBLE_FILES * 100) / count;
-    int barY = startY + (topIdx * (MAX_VISIBLE_FILES * itemH)) / count;
-    gfx.fillRect(124, barY, 2, barH, C_MUTED);
-  }
-  drawHintBar("click to link tag");
-}
-
-// ================================================================
-//  Link tag screen
-// ================================================================
-
-void drawLinkScreen(const char *filename) {
-  drawHeader("Link Tag", "cancel");
-  centerText("Link to:", 50, C_MUTED, 1);
-
-  const char *name = trimFilename(filename);
-  gfx.setTextColor(C_TEXT);
-  int16_t w = textWidth(name);
-  if (w > 120) {
-    char trunc[20];
-    strncpy(trunc, name, 16);
-    trunc[16] = '\0';
-    strcat(trunc, "...");
-    centerText(trunc, 65, C_TEXT, 1);
-  } else {
-    centerText(name, 65, C_TEXT, (w > 60) ? 1 : 2);
-  }
-  centerText("Scan tag now", 105, C_ACCENT, 1);
-  drawHintBar("hold to cancel");
-}
-
-// ================================================================
-//  Link success screen
-// ================================================================
-
-void drawLinkSuccess(const char *uid, const char *filename) {
-  drawHeader("Linked", "");
-  centerText("Tag Linked", 45, C_ACCENT, 2);
-  centerText(uid, 70, C_TEXT, 1);
-
-  const char *name = trimFilename(filename);
-  char arrow[64];
-  snprintf(arrow, sizeof(arrow), "-> %s", name);
-  centerText(arrow, 85, C_MUTED, 1);
-  drawHintBar("click to continue");
 }
 
 // ================================================================
@@ -420,64 +321,6 @@ void updateMenuSelection(int oldSel, int newSel) {
   gfx.print(MENU_ITEMS[newSel]);
   gfx.setCursor(116, yn + (itemH - 8) / 2);
   gfx.print(">");
-}
-
-void updateFileSelection(int oldSel, int newSel, const char *files[], int count) {
-  if (count == 0) return;
-
-  auto topFor = [count](int sel) {
-    int t = sel - 1;
-    if (t < 0) t = 0;
-    if (t + MAX_VISIBLE_FILES > count) t = count - MAX_VISIBLE_FILES;
-    if (t < 0) t = 0;
-    return t;
-  };
-
-  int oldTop = topFor(oldSel);
-  int newTop = topFor(newSel);
-
-  const int startY = 32, itemH = 24;
-
-  auto drawOne = [startY, itemH, files](int idx, int top, bool sel) {
-    int y = startY + (idx - top) * itemH;
-    gfx.fillRect(6, y - 1, 116, itemH - 2, sel ? C_SURFACE : C_BG);
-
-    const char *name = trimFilename(files[idx]);
-    char line[22];
-    if (textWidth(name) > 110) {
-      strncpy(line, name, 18); line[18] = '\0'; strcat(line, "...");
-    } else {
-      strncpy(line, name, sizeof(line) - 1); line[sizeof(line) - 1] = '\0';
-    }
-
-    gfx.setTextColor(sel ? C_ACCENT : C_TEXT);
-    gfx.setTextSize(1);
-    gfx.setCursor(14, y + (itemH - 8) / 2);
-    gfx.print(line);
-    if (sel) {
-      gfx.setCursor(116, y + (itemH - 8) / 2);
-      gfx.print(">");
-    }
-  };
-
-  if (oldTop == newTop) {
-    // Same visible window — just swap two items
-    drawOne(oldSel, oldTop, false);
-    drawOne(newSel, newTop, true);
-  } else {
-    // Window scrolled — redraw all visible items
-    gfx.fillRect(0, 22, 128, 126, C_BG);
-    for (int i = 0; i < MAX_VISIBLE_FILES && (newTop + i) < count; i++)
-      drawOne(newTop + i, newTop, (newTop + i) == newSel);
-  }
-
-  // Update scrollbar
-  if (count > MAX_VISIBLE_FILES) {
-    gfx.fillRect(124, startY, 2, MAX_VISIBLE_FILES * itemH, C_BG);
-    int barH = (MAX_VISIBLE_FILES * 100) / count;
-    int barY = startY + (newTop * (MAX_VISIBLE_FILES * itemH)) / count;
-    gfx.fillRect(124, barY, 2, barH, C_MUTED);
-  }
 }
 
 void updateVolumeDisplay(int level) {
