@@ -36,8 +36,8 @@
 #define I2S_DOUT 25
 
 // --- Rotary encoder ---
-#define ENC_CLK  2
-#define ENC_DT   15
+#define ENC_CLK  36
+#define ENC_DT   5
 #define ENC_SW   34
 
 // --- Audio ---

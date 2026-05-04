@@ -23,14 +23,14 @@ RFID-driven audio player. Scan an NFC tag → lookup UID in `tags.json` on SD ca
 | 21   | I2S_BCLK          | MAX98357A BCLK                           |
 | 25   | I2S_DOUT          | MAX98357A DIN                            |
 | 26   | I2S_LRC           | MAX98357A LRC                            |
-| 2    | ENC_CLK           | Rotary encoder (KY-040, not yet wired)   |
-| 15   | ENC_DT            | Rotary encoder direction                 |
+| 36   | ENC_CLK           | Rotary encoder (KY-040)                  |
+| 5    | ENC_DT            | Rotary encoder direction                 |
 | 34   | ENC_SW            | Rotary encoder button (input-only)       |
 | 35   | VBAT              | Battery voltage sense (unused)           |
 
 MAX98357A config: GAIN → GND (12 dB), SD/Mode → float (mono mix). Volume is software-controlled in the WAV player (not yet adjustable at runtime).
 
-KY-040 encoder: CLK→GPIO2, DT→GPIO15, SW→GPIO34, +→3.3V, GND→GND. GPIO 34 is input-only but the module's external 10k pull-up resistor makes the button work. Encoder firmware is a placeholder — `encoder.cpp` returns no-ops until hardware is wired.
+KY-040 encoder: CLK→GPIO36, DT→GPIO5, SW→GPIO34, +→3.3V, GND→GND. GPIO 34 and 36 are input-only but the module's external 10k pull-up resistors make them work.
 
 ## Hardware
 

@@ -68,8 +68,8 @@ Planned for tag management GUI. Not yet wired.
 
 | KY-040 pin | ESP32 GPIO | Notes                      |
 |------------|------------|----------------------------|
-| CLK (A)    | 2          | Rotation pulse             |
-| DT  (B)    | 15         | Direction                  |
+| CLK (A)    | 36         | Rotation pulse             |
+| DT  (B)    | 5          | Direction                  |
 | SW         | 34         | Push button (input-only)   |
 | +          | 3.3V       |                            |
 | GND        | GND        |                            |
