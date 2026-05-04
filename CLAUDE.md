@@ -4,43 +4,33 @@
 
 RFID-driven audio player. Scan an NFC tag → lookup UID in `tags.json` on SD card → play the mapped WAV file through a MAX98357A I²S amplifier. Built on a Lolin D32 Pro (ESP32) with Arduino framework on PlatformIO.
 
-**Status:** Milestone 1 complete — NFC tag reading, SD card WAV playback, TFT display all functional.
+**Status:** Milestone 2 complete — web-based tag management, runtime volume control, encoder-driven GUI all functional.
 
 ## Pin map
 
 | GPIO | Function          | Notes                                    |
 |------|-------------------|------------------------------------------|
-| 4    | SD_CS             | Onboard microSD slot                     |
-| 14   | TFT_CS            | Display chip select (on-board TFT port)  |
+| 4    | SD_CS             |                                          |
+| 14   | TFT_CS            |                                          |
 | 18   | SCK (VSPI)        | Shared: TFT SCL + SD_SCK                 |
 | 19   | MISO (VSPI)       | SD only (ST7735S is write-only)          |
 | 23   | MOSI (VSPI)       | Shared: TFT SDA + SD_MOSI                |
-| 27   | TFT_DC            | Display data/command (on-board TFT port) |
-| 32   | TFT_BL            | Display backlight (on-board TFT port)    |
-| 33   | TFT_RST           | Display reset (on-board TFT port)        |
+| 27   | TFT_DC            |                                          |
+| 32   | TFT_BL            |                                          |
+| 33   | TFT_RST           |                                          |
 | 13   | PN532_RX (ESP TX) | ESP32 TX → PN532 RX                     |
 | 22   | PN532_TX (ESP RX) | PN532 TX → ESP32 GPIO 22 (UART2 RX)     |
-| 21   | I2S_BCLK          | MAX98357A BCLK                           |
-| 25   | I2S_DOUT          | MAX98357A DIN                            |
-| 26   | I2S_LRC           | MAX98357A LRC                            |
-| 36   | ENC_CLK           | Rotary encoder (KY-040)                  |
-| 5    | ENC_DT            | Rotary encoder direction                 |
-| 34   | ENC_SW            | Rotary encoder button (input-only)       |
-| 35   | VBAT              | Battery voltage sense (unused)           |
+| 21   | I2S_BCLK          |                                          |
+| 25   | I2S_DOUT          |                                          |
+| 26   | I2S_LRC           |                                          |
+| 36   | ENC_CLK           |                                          |
+| 5    | ENC_DT            |                                          |
+| 34   | ENC_SW            | Input-only (external pull-up on module)  |
+| 35   | VBAT              | Unused                                   |
 
-MAX98357A config: GAIN → GND (12 dB), SD/Mode → float (mono mix). Volume is software-controlled in the WAV player (not yet adjustable at runtime).
+MAX98357A config: GAIN → GND (12 dB), SD/Mode → float (mono mix). Volume is software-controlled via encoder (runtime adjustable, persisted to `/volume.cfg` on SD).
 
 KY-040 encoder: CLK→GPIO36, DT→GPIO5, SW→GPIO34, +→3.3V, GND→GND. GPIO 34 and 36 are input-only but the module's external 10k pull-up resistors make them work.
-
-## Hardware
-
-| Part            | Model                     |
-|-----------------|---------------------------|
-| Microcontroller | Lolin D32 Pro (ESP32)     |
-| NFC reader      | Elechouse PN532 (HSU)     |
-| Audio amp       | MAX98357A (I²S, mono)     |
-| Display         | 1.8" ST7735S, 128×160 SPI |
-| Storage         | microSD (FAT32) onboard   |
 
 ## VSPI bus sharing
 
@@ -49,23 +39,24 @@ KY-040 encoder: CLK→GPIO36, DT→GPIO5, SW→GPIO34, +→3.3V, GND→GND. GPIO
 - `Arduino_ESP32SPI` (TFT) and `SD.h` (SD card) both use **bare-metal SPI** via `_spi_bus_array[VSPI]` — direct register writes.
 - `Arduino_ESP32QSPI` (old round display) used the **ESP-IDF SPI driver** (`spi_bus_initialize` / `spi_device_transmit`), which is incompatible with bare-metal SPI on the same host.
 - Init order matters: `gfx.begin()` zeroes VSPI registers via `spiInitBus()`. SD must be initialized **after** TFT so it reconfigures VSPI. During normal operation, each device reconfigures the bus before use (TFT via `beginWrite()`, SD via `beginTransaction()`).
-- If switching back to a QSPI display, both TFT and SD must use the ESP-IDF driver path. The Arduino SD library (`SD.h`) will not work alongside an ESP-IDF-managed bus.
 
 ## Source files
 
 ```
 src/
 ├── config.h          — Pin definitions, colors, D32 Pro macro fix
-├── audio.h/.cpp      — WavHeader, parseWavHeader, i2sInit, playWav(), stopPlayback()
+├── audio.h/.cpp      — WavHeader, WavMeta, playWav(), stopPlayback(), parseWavMeta()
 ├── screen.h/.cpp     — TFT draw functions (extern gfx, uses C_ color constants)
 ├── tags.h/.cpp       — tagDoc (JsonDocument), uid formatting, lookupTag()
-├── encoder.h/.cpp    — Rotary encoder reader (placeholder, not yet wired)
-└── main.cpp          — Peripherals (bus, gfx, nfc), setup(), loop(), tagPresent
+├── encoder.h/.cpp    — Rotary encoder (ISR quadrature, button state machine, volume save/load)
+├── gui.h/.cpp        — Management mode (menu, volume, web server screens)
+├── web.h/.cpp        — WiFi AP, REST API, file upload, SPA HTML page
+└── main.cpp          — Peripherals (bus, gfx, nfc), setup(), loop()
 platformio.ini        — PlatformIO project config + library dependencies
 README.md             — User-facing docs (wiring, build steps, SD layout)
 ```
 
-`playWav()` accepts a `PN532 &nfc` reference parameter so audio.cpp doesn't depend on a global NFC object. `stopRequested` and `audioPlaying` are global flags in audio.cpp, checked by main.cpp's loop.
+`playWav()` accepts a `PN532 &nfc` reference parameter so audio.cpp doesn't depend on a global NFC object. `stopRequested` and `audioPlaying` are global flags in audio.cpp. `handleWebClient()` is called during playback to service HTTP requests.
 
 ## Libraries (platformio.ini)
 
@@ -75,8 +66,17 @@ README.md             — User-facing docs (wiring, build steps, SD layout)
 | ArduinoJson      | `bblanchon/ArduinoJson @ ^7`                  | Parse `/tags.json`   |
 | PN532 + PN532_HSU| Bundled in `lib/`                             | NFC reader           |
 | SD               | Built-in (Arduino ESP32 framework)            | SD card access       |
+| WiFi + WebServer | Built-in (Arduino ESP32 framework)            | AP mode + REST API   |
 
 WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, deprecated but functional). No external audio library is needed.
+
+## Encoder events
+
+`readEncoder()` returns:
+- `0` — no event
+- `±N` — N full detents clockwise (positive) or counter-clockwise (negative)
+- `100` (`ENC_CLICK`) — short press (<600ms release)
+- `101` (`ENC_HOLD`) — long press (>600ms, fires on hold, not on release)
 
 ## main.cpp architecture
 
@@ -86,18 +86,21 @@ WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, d
 3. Boot screen on TFT (SD error or waiting screen)
 4. PN532 init with firmware version check + raw-byte diagnostic on failure
 5. `nfc.SAMConfig()`, draw waiting screen
-6. `initEncoder()` — placeholder, no-op until encoder is wired
+6. `initEncoder()` — loads saved volume from `/volume.cfg`, attaches ISR interrupts for quadrature decoding
 
 **loop() state machine:**
+- Management mode active (`guiActive()`) → delegate to `guiLoop()` (menu, volume, web server)
+- Jukebox mode: read encoder for volume adjustment (rotation) or save (click) or enter menu (hold)
 - `!tagPresent && found` → tag arrived: lookup UID → draw now-playing → `playWav()` → draw waiting
 - `tagPresent && !found` → tag removed: stop playback → draw waiting
+- Unknown tag: 10-second dismiss screen with click/hold to dismiss or tag removal
 - No tag while audio plays: NFC polling happens inside `playWav()` every ~150ms
 
 **playWav() flow:**
 1. Open WAV file via `SD.open()`, parse header (RIFF/fmt/data chunks)
 2. Configure I2S to match file's sample rate / bits / channels
-3. Stream PCM in 2KB chunks: `f.read()` → `i2s_write()`
-4. Poll NFC for tag removal every ~150ms (3 consecutive misses → stop)
+3. Stream PCM in 2KB chunks: `f.read()` → volume-scale 16-bit samples → `i2s_write()`
+4. Per-chunk: service web client, check encoder for volume changes (draw overlay), poll NFC for tag removal every ~150ms (3 consecutive misses → stop)
 5. Teardown I2S on exit
 
 **UID matching:** `uidToStr()` produces colon-separated hex (`04:A2:24:B2:C3:80:81`) to match keys in `tags.json`. `lookupTag()` uses ArduinoJson's `tagDoc[key].isNull()` check.
@@ -106,11 +109,12 @@ WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, d
 
 ```
 /
-├── img/                # Album art (128×160 BMP, 24-bit)
+├── img/                # Album art (BMP, 24-bit, auto-scaled to 128×128)
 │   └── album1.bmp
 ├── music/              # WAV files (standard PCM, any sample rate)
 │   └── song.wav
-└── tags.json           # UID → file + metadata mapping
+├── tags.json           # UID → file + metadata mapping (managed by web UI)
+└── volume.cfg          # Persisted volume level 0–100 (plain text)
 ```
 
 `tags.json` format (only `file` is required):
@@ -138,6 +142,12 @@ Paths may or may not start with `/` — `playWav()` prepends it if missing.
 
 Board: `lolin_d32_pro`, framework: `arduino`, CPU: 240 MHz.
 
+## Dev workflow
+
+**After every code change:**
+1. **Verify it compiles** — run `~/.platformio/penv/bin/pio run` and fix any syntax or compile-time errors before considering the change complete. Never leave the project in a state that fails to build.
+2. **Cross-validate docs** — check CLAUDE.md and README.md against the actual source files. Update any stale descriptions — pin maps, source file trees, architecture flows, status, constraints, SD card layout, and TODO lists. These documents are the source of truth for future agents and contributors; drift between docs and code compounds over time.
+
 ## Known constraints
 
 - **D32 Pro `SS` macro conflict:** `pins_arduino.h` defines `#define SS TF_CS` (→ `#define SS 4`). Libraries that use `SS` as a parameter name will fail to compile. Avoid libraries affected by this, or `#undef SS` before including them.
@@ -145,3 +155,5 @@ Board: `lolin_d32_pro`, framework: `arduino`, CPU: 240 MHz.
 - **I2S uses legacy driver:** The `driver/i2s.h` API is deprecated in ESP-IDF 5.x. It works but emits warnings. Migration to `i2s_std.h` is a future task.
 - **Single audio track at a time:** No crossfade or queue. Scanning a new tag stops the current track. Tag must be removed before a new tag is accepted.
 - **WAV only:** Standard PCM WAV (16/24-bit, mono/stereo, any sample rate). No MP3/FLAC support.
+- **Web server uses AP mode:** `WIFI_SSID` / `WIFI_PASSWORD` from config.h. Exposes REST API (`/api/tags`, `/api/files`, `/api/images`, `/upload`) and serves a single-page web app for tag management.
+- **Heap is tight:** BMP loader allocates `128×128×2` bytes (32 KB), `playWav()` allocates a 2 KB DMA buffer. Avoid additional large heap allocations; prefer stack or static buffers where possible.

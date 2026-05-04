@@ -64,7 +64,7 @@ The SD card MISO line (GPIO 19) is not connected to the display — the ST7735S 
 
 ### Rotary encoder (KY-040)
 
-Planned for tag management GUI. Not yet wired.
+Used for volume adjustment and menu navigation.
 
 | KY-040 pin | ESP32 GPIO | Notes                      |
 |------------|------------|----------------------------|
@@ -74,7 +74,12 @@ Planned for tag management GUI. Not yet wired.
 | +          | 3.3V       |                            |
 | GND        | GND        |                            |
 
-The KY-040 module has built-in 10k pull-up resistors. GPIO 34 is input-only on ESP32 — this works because the module handles the pull-up.
+The KY-040 module has built-in 10k pull-up resistors. GPIO 34 and 36 are input-only on ESP32 — this works because the module handles the pull-up.
+
+**Encoder controls:**
+- **Rotate** — adjust volume (jukebox mode) or navigate menus (management mode)
+- **Click (short press)** — save volume (jukebox) or select/confirm (menu)
+- **Hold (long press, >600ms)** — enter management menu (jukebox) or go back (menu)
 
 MAX98357A configuration pins:
 - **GAIN** — tie to GND for 12 dB and control volume in software. Leaving the pin floating is unreliable (high-impedance input, noise can produce random gain at power-up).
@@ -87,19 +92,33 @@ Each NFC tag UID maps to a single audio file on the SD card. When a tag is scann
 1. Any current playback stops immediately
 2. The file mapped to the scanned UID begins playback from the start
 3. Playback continues until the file ends or the tag is removed
+4. During playback, rotate the encoder to adjust volume (5-second overlay) and click to save
 
-Unknown tags are logged over serial and displayed on screen. The tag must be removed before a new tag is accepted — hot-swapping tags mid-playback is not yet supported.
+Unknown tags are displayed on screen for 10 seconds with their UID — click or hold the encoder to dismiss. The tag must be removed before a new tag is accepted (hot-swapping is not supported).
+
+## Web server & tag management
+
+Hold the encoder button (>600ms) to enter the management menu, then select "Web Server" to start a WiFi access point. Connect a phone or laptop to the **Jukebox-Setup** network (password: `12345678`) and open `http://192.168.4.1` in a browser.
+
+The web interface provides:
+- **Tag grid** — browse all registered tags with album art, title, and artist
+- **Add / Edit / Remove tags** — link any NFC tag UID to a WAV file on the SD card with optional metadata
+- **File upload** — upload WAV files directly to the SD card over WiFi
+- **Album art** — images in `/img/` are available for tag assignment
+
+Changes are written to `/tags.json` on the SD card immediately.
 
 ## SD card layout
 
 ```
 /
-├── img/                          # Album art (128×160 BMP, 24-bit)
+├── img/                          # Album art (BMP, 24-bit, auto-scaled to 128×128)
 │   └── album1.bmp
 ├── music/                        # WAV audio files
 │   ├── sample-12s.wav
 │   └── gc_22k.wav
-└── tags.json                     # UID → file + metadata mapping
+├── tags.json                     # UID → file + metadata mapping
+└── volume.cfg                    # Persisted volume level (plain text, 0–100)
 ```
 
 `tags.json` maps each tag UID to a music file. Optional fields provide album art and metadata:
@@ -121,7 +140,7 @@ All fields except `file` are optional. `img` paths are relative to `/img/` on th
 
 ## Building & flashing
 
-**Toolchain:** Arduino framework on ESP32 (via Arduino IDE or PlatformIO).
+**Toolchain:** PlatformIO with Arduino framework on ESP32.
 
 **Libraries:**
 - PN532 + PN532_HSU (bundled in `lib/`, `https://github.com/elechouse/PN532`) — NFC reader
@@ -129,14 +148,14 @@ All fields except `file` are optional. `img` paths are relative to `/img/` on th
 - `Arduino_GFX` (moononournation) — TFT display driver (ST7735)
 - WAV audio uses the ESP32's built-in I2S driver (no extra library needed)
 - SD (built-in, Arduino ESP32 framework) — SD card access via SPI
+- WiFi + WebServer (built-in, Arduino ESP32 framework) — AP mode + REST API
 
-**Pins** are defined in `src/config.h`. The code is split into modules under `src/`: `config.h`, `audio.cpp`, `screen.cpp`, `tags.cpp`, `encoder.cpp`, `main.cpp`.
+**Pins** are defined in `src/config.h`. The code is split into modules under `src/`: `config.h`, `audio.cpp`, `screen.cpp`, `tags.cpp`, `encoder.cpp`, `gui.cpp`, `web.cpp`, `main.cpp`.
 
 **Flash steps:**
-1. Format SD card as FAT32, copy `music/` and `tags.json` to the root
-2. Open the sketch, select board "LOLIN D32 PRO"
-3. Build and upload over USB
-4. Open the serial monitor at 115200 baud to see boot diagnostics and scanned UIDs
+1. Format SD card as FAT32, copy `music/`, `img/` (optional), and `tags.json` to the root
+2. Run `~/.platformio/penv/bin/pio run -t upload` to build and flash over USB
+3. Run `~/.platformio/penv/bin/pio device monitor` to see boot diagnostics and scanned UIDs at 115200 baud
 
 ## Troubleshooting
 
@@ -148,12 +167,11 @@ All fields except `file` are optional. `img` paths are relative to `/img/` on th
 
 ## Status
 
-Milestone 1 complete — NFC tag reading, SD card WAV playback, and TFT display are all functional.
+Milestone 2 complete — web-based tag management, runtime volume control, and encoder-driven GUI are all functional.
 
 ## TODO
 
-- **Tag management GUI** — on-device interface to link/unlink music files with NFC tags, no computer needed
 - Audio fade-out on track stop
 - "Unknown tag" audio chirp
-- Software volume control at runtime
+- Queue / crossfade between tracks
 
