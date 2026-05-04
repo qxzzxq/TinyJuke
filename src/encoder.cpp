@@ -70,14 +70,13 @@ void initEncoder() {
 }
 
 int readEncoder() {
-  // --- Rotation ---
+  // --- Rotation: return full accumulated delta ---
   noInterrupts();
   int d = encDelta;
   encDelta = 0;
   interrupts();
 
-  if (d > 0) return ENC_CW;
-  if (d < 0) return ENC_CCW;
+  if (d != 0) return d;  // ±N steps (CW positive, CCW negative)
 
   // --- Button (debounced state machine) ---
   bool raw = (digitalRead(ENC_SW) == LOW);

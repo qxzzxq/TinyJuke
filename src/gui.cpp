@@ -207,13 +207,13 @@ void guiLoop() {
 
     // ================ MENU ================
     case Screen::MENU:
-      if (ev == ENC_CW) {
+      if (ev > 0 && ev < ENC_CLICK) {
         int prev = menuSel;
-        menuSel = (menuSel + 1) % 3;
+        menuSel = (menuSel + ev) % 3;
         updateMenuSelection(prev, menuSel);
-      } else if (ev == ENC_CCW) {
+      } else if (ev < 0) {
         int prev = menuSel;
-        menuSel = (menuSel + 2) % 3;
+        menuSel = (menuSel + ev % 3 + 3) % 3;
         updateMenuSelection(prev, menuSel);
       } else if (ev == ENC_CLICK) {
         switch (menuSel) {
@@ -232,13 +232,13 @@ void guiLoop() {
         redraw();
         break;
       }
-      if (ev == ENC_CW) {
+      if (ev > 0 && ev < ENC_CLICK) {
         int prev = fileSel;
-        fileSel = (fileSel + 1) % fileCount;
+        fileSel = (fileSel + ev) % fileCount;
         updateFileSelection(prev, fileSel, (const char **)files, fileCount);
-      } else if (ev == ENC_CCW) {
+      } else if (ev < 0) {
         int prev = fileSel;
-        fileSel = (fileSel + fileCount - 1) % fileCount;
+        fileSel = (fileSel + ev % fileCount + fileCount) % fileCount;
         updateFileSelection(prev, fileSel, (const char **)files, fileCount);
       } else if (ev == ENC_CLICK) {
         strncpy(linkFile, files[fileSel], 63);
@@ -262,19 +262,39 @@ void guiLoop() {
       break;
 
     // ================ VOLUME ================
-    case Screen::VOLUME:
-      if (ev == ENC_CW && volumeLevel < 100) {
-        volumeLevel++;
-        updateVolumeDisplay(volumeLevel);
-      } else if (ev == ENC_CCW && volumeLevel > 0) {
-        volumeLevel--;
-        updateVolumeDisplay(volumeLevel);
-      } else if (ev == ENC_CLICK) {
-        saveVolume();
-        scr = Screen::MENU; menuSel = 2;
-        redraw();
+    case Screen::VOLUME: {
+      int oldLevel = volumeLevel;
+
+      // readEncoder now returns the full accumulated delta (±1..±N),
+      // so fast encoder turns arrive as a single event. Still batch
+      // to catch any steps that land between loop iterations.
+      for (;;) {
+        if (ev > 0 && ev < ENC_CLICK) {
+          int nv = volumeLevel + ev;
+          volumeLevel = (nv > 100) ? 100 : (nv < 0 ? 0 : nv);
+        } else if (ev < 0) {
+          int nv = volumeLevel + ev;
+          volumeLevel = (nv < 0) ? 0 : (nv > 100 ? 100 : nv);
+        } else if (ev == ENC_CLICK) {
+          saveVolume();
+          scr = Screen::MENU; menuSel = 2;
+          redraw();
+          break;
+        }
+        else if (ev == ENC_HOLD) {
+          saveVolume();
+          scr = Screen::MENU; menuSel = 2;
+          redraw();
+          break;
+        }
+        ev = readEncoder();
+        if (ev == ENC_NONE) break;
       }
+
+      if (volumeLevel != oldLevel)
+        updateVolumeDisplay(volumeLevel);
       break;
+    }
 
     // ================ WEB (encoder only used for HOLD/CLICK — HTTP serviced above) ================
     case Screen::WEB:

@@ -368,20 +368,27 @@ void drawLinkSuccess(const char *uid, const char *filename) {
 //  Volume screen
 // ================================================================
 
+// Track the last level drawn on screen, so updateVolumeDisplay can
+// do differential updates without flickering. Shared between
+// drawVolumeScreen (initial draw) and updateVolumeDisplay (incremental).
+static int s_volumeDrawn = -1;
+
 void drawVolumeScreen(int level) {
   drawHeader("Volume", "back");
 
   const int barX = 14, barY = 70, barW = 100, barH = 14;
-  gfx.fillRoundRect(barX, barY, barW, barH, 4, C_LINE);
+  gfx.fillRect(barX, barY, barW, barH, C_LINE);
   int fillW = (barW - 4) * level / 100;
   if (fillW > 0)
-    gfx.fillRoundRect(barX + 2, barY + 2, fillW, barH - 4, 3, C_ACCENT);
+    gfx.fillRect(barX + 2, barY + 2, fillW, barH - 4, C_ACCENT);
 
   char pct[8];
   snprintf(pct, sizeof(pct), "%d%%", level);
   centerText(pct, 100, C_TEXT, 2);
 
   drawHintBar("turn to adjust \267 click to save");
+
+  s_volumeDrawn = level;
 }
 
 // ================================================================
@@ -477,17 +484,28 @@ void updateVolumeDisplay(int level) {
   const int barX = 14, barY = 70, barW = 100, barH = 14;
   int fillW = (barW - 4) * level / 100;
 
-  // Clear bar interior with track color (C_LINE) — no flash since it matches
-  // the track, which is already C_LINE.
-  gfx.fillRect(barX + 2, barY + 2, barW - 4, barH - 4, C_LINE);
-  if (fillW > 0)
-    gfx.fillRoundRect(barX + 2, barY + 2, fillW, barH - 4, 3, C_ACCENT);
+  if (s_volumeDrawn >= 0) {
+    int prevFillW = (barW - 4) * s_volumeDrawn / 100;
+    if (fillW < prevFillW) {
+      // Volume decreased — only clear the portion that's no longer filled.
+      int clearX = barX + 2 + fillW;
+      int clearW = prevFillW - fillW;
+      gfx.fillRect(clearX, barY + 2, clearW, barH - 4, C_LINE);
+    }
+  } else {
+    gfx.fillRect(barX + 2, barY + 2, barW - 4, barH - 4, C_LINE);
+  }
 
-  // Clear percentage text — size 2 = 16px tall, cursor y=100 → y=100..116
+  if (fillW > 0)
+    gfx.fillRect(barX + 2, barY + 2, fillW, barH - 4, C_ACCENT);
+
+  // Erase and redraw percentage
   gfx.fillRect(0, 98, 128, 22, C_BG);
   char pct[8];
   snprintf(pct, sizeof(pct), "%d%%", level);
   centerText(pct, 100, C_TEXT, 2);
+
+  s_volumeDrawn = level;
 }
 
 void drawWebServerScreen() {

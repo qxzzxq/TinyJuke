@@ -139,18 +139,14 @@ void loop() {
   // --- Jukebox mode: handle encoder for volume / menu entry ---
   int ev = readEncoder();
 
-  if (ev == ENC_CW && volumeLevel < 100) {
-    volumeLevel++;
-    if (audioPlaying) {
-      // Show volume popup briefly (simplified: draw at bottom of current screen)
-      gfx.fillRect(38, 140, 52, 20, C_BG);
-      gfx.setTextColor(C_ACCENT); gfx.setTextSize(1);
-      gfx.setCursor(40, 148);
-      gfx.print("vol "); gfx.print(volumeLevel); gfx.print("%");
+  if ((ev > 0 && ev < ENC_CLICK) || (ev < 0)) {
+    int steps = (ev > 0) ? ev : -ev;
+    int delta = (ev > 0) ? 1 : -1;
+    while (steps-- > 0) {
+      int next = volumeLevel + delta;
+      if (next < 0 || next > 100) break;
+      volumeLevel = next;
     }
-  }
-  if (ev == ENC_CCW && volumeLevel > 0) {
-    volumeLevel--;
     if (audioPlaying) {
       gfx.fillRect(38, 140, 52, 20, C_BG);
       gfx.setTextColor(C_ACCENT); gfx.setTextSize(1);
