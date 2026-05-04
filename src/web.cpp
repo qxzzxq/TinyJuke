@@ -263,7 +263,8 @@ static void handleDeleteFile() {
 // ----------------------------------------------------------------
 
 void initWebServer() {
-  WiFi.softAP("Jukebox-Setup", "12345678");
+  Serial.println("Starting web server...");
+  WiFi.softAP(WIFI_SSID, WIFI_PASSWORD);
   Serial.print("AP IP: ");
   Serial.println(WiFi.softAPIP());
 
@@ -277,6 +278,17 @@ void initWebServer() {
   Serial.println("Web server started.");
 }
 
+void stopWebServer() {
+  Serial.println("Stopping web server...");
+  server.stop();
+  WiFi.softAPdisconnect(true);
+  Serial.println("Web server stopped.");
+}
+
 void handleWebClient() {
   server.handleClient();
+}
+
+int getWebConnectionCount() {
+  return WiFi.softAPgetStationNum();
 }

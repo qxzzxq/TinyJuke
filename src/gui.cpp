@@ -6,7 +6,6 @@
 
 #include <SD.h>
 #include <PN532.h>
-#include <WiFi.h>
 
 // The NFC reader is defined in main.cpp — GUI needs it for tag linking.
 extern PN532 nfc;
@@ -87,7 +86,7 @@ static void redraw() {
       drawVolumeScreen(volumeLevel);
       break;
     case Screen::WEB:
-      drawWebServerScreen();
+      drawWebServerScreen(getWebConnectionCount());
       break;
   }
 }
@@ -164,9 +163,10 @@ void guiLoop() {
     return;
   }
 
-  // WEB screen: always service HTTP requests
+  // WEB screen: always service HTTP requests, update connection count
   if (scr == Screen::WEB && webRunning) {
     handleWebClient();
+    updateWebConnectionCount(getWebConnectionCount());
   }
 
   // --- Encoder events ---
@@ -194,7 +194,7 @@ void guiLoop() {
         scr = Screen::MENU; menuSel = 2;
         break;
       case Screen::WEB:
-        WiFi.softAPdisconnect(true);
+        stopWebServer();
         webRunning = false;
         scr = Screen::MENU; menuSel = 1;
         break;
@@ -300,7 +300,7 @@ void guiLoop() {
     // ================ WEB (encoder only used for HOLD/CLICK — HTTP serviced above) ================
     case Screen::WEB:
       if (ev == ENC_CLICK) {
-        WiFi.softAPdisconnect(true);
+        stopWebServer();
         webRunning = false;
         scr = Screen::MENU; menuSel = 1;
         redraw();

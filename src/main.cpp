@@ -119,9 +119,6 @@ void setup() {
 
   // 5. Init encoder (loads saved volume, sets up interrupts)
   initEncoder();
-
-  // 6. Start web server
-  initWebServer();
 }
 
 // ================================================================
@@ -132,9 +129,6 @@ void loop() {
     guiLoop();
     return;
   }
-
-  // Service web requests
-  handleWebClient();
 
   // --- Jukebox mode: handle encoder for volume / menu entry ---
   int ev = readEncoder();

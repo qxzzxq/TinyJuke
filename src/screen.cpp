@@ -508,7 +508,9 @@ void updateVolumeDisplay(int level) {
   s_volumeDrawn = level;
 }
 
-void drawWebServerScreen() {
+static int s_webDrawn = -1;
+
+void drawWebServerScreen(int connections) {
   gfx.fillScreen(C_BG);
   centerText("Web Server", 18, C_ACCENT, 2);
 
@@ -519,18 +521,33 @@ void drawWebServerScreen() {
   gfx.setCursor(42, 46); gfx.print(WIFI_SSID);
 
   gfx.setTextColor(C_TEXT);
-  gfx.setCursor(6, 62); gfx.print("Pass:");
+  gfx.setCursor(6, 60); gfx.print("Pass:");
   gfx.setTextColor(C_ACCENT);
-  gfx.setCursor(42, 62); gfx.print(WIFI_PASSWORD);
+  gfx.setCursor(42, 60); gfx.print(WIFI_PASSWORD);
 
   gfx.setTextColor(C_TEXT);
-  gfx.setCursor(6, 78); gfx.print("URL:");
+  gfx.setCursor(6, 74); gfx.print("URL:");
   gfx.setTextColor(C_ACCENT);
-  gfx.setCursor(42, 78); gfx.print("192.168.4.1");
+  gfx.setCursor(42, 74); gfx.print("192.168.4.1");
+
+  char conn[24];
+  snprintf(conn, sizeof(conn), "%d web connection(s)", connections);
+  centerText(conn, 94, C_TEXT, 1);
 
   gfx.setTextColor(C_MUTED);
-  gfx.setCursor(6, 100); gfx.print("Open in browser");
-  gfx.setCursor(6, 110); gfx.print("to manage files & tags");
+  gfx.setCursor(6, 114); gfx.print("Open in browser");
+  gfx.setCursor(6, 124); gfx.print("to manage files & tags");
 
   drawHintBar("click to stop server");
+  s_webDrawn = connections;
+}
+
+void updateWebConnectionCount(int connections) {
+  if (connections == s_webDrawn) return;
+
+  gfx.fillRect(0, 92, 128, 16, C_BG);
+  char conn[24];
+  snprintf(conn, sizeof(conn), "%d web connection(s)", connections);
+  centerText(conn, 94, C_TEXT, 1);
+  s_webDrawn = connections;
 }
