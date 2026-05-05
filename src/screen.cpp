@@ -51,7 +51,7 @@ static const char *trimFilename(const char *path) {
 // Truncate string to fit maxWidth pixels (with "..." appended), accounting
 // for a ~2-letter margin on each side of the screen. The margin is derived
 // from the text size: 12px per char at size 2, 6px at size 1.
-static int marginForSize(uint8_t size) { return 12 * size; }
+static int marginForSize(uint8_t size) { return 5 * size; }
 
 static void truncateToFit(const char *src, char *dst, size_t dstSize,
                           int maxWidth, uint8_t textSize) {
