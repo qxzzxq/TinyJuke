@@ -48,6 +48,38 @@ static const char *trimFilename(const char *path) {
   return name ? name + 1 : path;
 }
 
+// Truncate string to fit maxWidth pixels (with "..." appended), accounting
+// for a ~2-letter margin on each side of the screen. The margin is derived
+// from the text size: 12px per char at size 2, 6px at size 1.
+static int marginForSize(uint8_t size) { return 12 * size; }
+
+static void truncateToFit(const char *src, char *dst, size_t dstSize,
+                          int maxWidth, uint8_t textSize) {
+  gfx.setTextSize(textSize);
+  if (textWidth(src) <= maxWidth) {
+    strncpy(dst, src, dstSize - 1);
+    dst[dstSize - 1] = '\0';
+    return;
+  }
+  size_t len = strlen(src);
+  if (len > dstSize - 4) len = dstSize - 4;
+  while (len > 0) {
+    char tmp[128];
+    strncpy(tmp, src, len);
+    tmp[len] = '\0';
+    strcat(tmp, "...");
+    if (textWidth(tmp) <= maxWidth) break;
+    len--;
+  }
+  if (len > 0) {
+    strncpy(dst, src, len);
+    dst[len] = '\0';
+    strcat(dst, "...");
+  } else {
+    dst[0] = '\0';
+  }
+}
+
 // ================================================================
 //  Jukebox screens
 // ================================================================
@@ -200,28 +232,27 @@ void drawNowPlayingScreen(const TagInfo &tag) {
     gfx.draw16bitRGBBitmap(0, 0, scaled, ART_SZ, ART_SZ);
 
     // Text area: y=240..319 (80px)
+    // Title + artist block is ~30px tall; center vertically: top = 265
     gfx.fillRect(0, 240, gfx.width(), 80, C_SURFACE);
     gfx.fillRect(0, 240, gfx.width(), 1, C_ACCENT);
 
     const char *line1 = title ? title : fallback;
     char buf[64];
-    int16_t tw = textWidth(line1);
-    if (tw > 230) {
-      strncpy(buf, line1, 19); buf[19] = '\0'; strcat(buf, "...");
-      centerText(buf, 250, C_TEXT, 2);
-      strncpy(s_botTitle, buf, sizeof(s_botTitle) - 1);
-    } else {
-      centerText(line1, 250, C_TEXT, 2);
-      strncpy(s_botTitle, line1, sizeof(s_botTitle) - 1);
-    }
+    int maxW = gfx.width() - 2 * marginForSize(2);
+    truncateToFit(line1, buf, sizeof(buf), maxW, 2);
+    centerText(buf, 265, C_TEXT, 2);
+    strncpy(s_botTitle, buf, sizeof(s_botTitle) - 1);
 
     if (artist) {
-      if (album) snprintf(buf, sizeof(buf), "%s  \267  %s", artist, album);
-      else snprintf(buf, sizeof(buf), "%s", artist);
-      centerText(buf, 280, C_MUTED, 1);
+      char artistBuf[64];
+      if (album) snprintf(artistBuf, sizeof(artistBuf), "%s  \267  %s", artist, album);
+      else snprintf(artistBuf, sizeof(artistBuf), "%s", artist);
+      int artistMaxW = gfx.width() - 2 * marginForSize(1);
+      truncateToFit(artistBuf, buf, sizeof(buf), artistMaxW, 1);
+      centerText(buf, 287, C_MUTED, 1);
       strncpy(s_botSub, buf, sizeof(s_botSub) - 1);
     } else if (album) {
-      centerText(album, 280, C_MUTED, 1);
+      centerText(album, 287, C_MUTED, 1);
       strncpy(s_botSub, album, sizeof(s_botSub) - 1);
     } else {
       s_botSub[0] = '\0';
@@ -231,19 +262,22 @@ void drawNowPlayingScreen(const TagInfo &tag) {
     // Text-only layout
     if (title) {
       centerText("Playing", 60, C_ACCENT, 3);
-      centerText(title, 150, C_TEXT, 2);
-      if (artist) centerText(artist, 178, C_MUTED, 1);
+      char buf[64];
+      int titleMaxW = gfx.width() - 2 * marginForSize(2);
+      truncateToFit(title, buf, sizeof(buf), titleMaxW, 2);
+      centerText(buf, 150, C_TEXT, 2);
+      if (artist) {
+        int artMaxW = gfx.width() - 2 * marginForSize(1);
+        truncateToFit(artist, buf, sizeof(buf), artMaxW, 1);
+        centerText(buf, 178, C_MUTED, 1);
+      }
       if (album)  centerText(album, 195, C_ACCENT, 1);
     } else {
       centerText("Playing", 60, C_ACCENT, 3);
-      int16_t w = textWidth(fallback);
-      if (w > 220) {
-        char trunc[20];
-        strncpy(trunc, fallback, 16); trunc[16] = '\0'; strcat(trunc, "...");
-        centerText(trunc, 160, C_TEXT, 2);
-      } else {
-        centerText(fallback, 160, C_TEXT, (w > 120) ? 2 : 3);
-      }
+      char buf[64];
+      int fbMaxW = gfx.width() - 2 * marginForSize(2);
+      truncateToFit(fallback, buf, sizeof(buf), fbMaxW, 2);
+      centerText(buf, 160, C_TEXT, 2);
     }
     drawHintBar("remove tag to stop");
     s_hasImg = false;
@@ -376,17 +410,18 @@ static void redrawNowPlayingBottom() {
     gfx.fillRect(0, 240, gfx.width(), 1, C_ACCENT);
 
     if (s_botTitle[0])
-      centerText(s_botTitle, 250, C_TEXT, 2);
+      centerText(s_botTitle, 265, C_TEXT, 2);
 
     if (s_botSub[0])
-      centerText(s_botSub, 280, C_MUTED, 1);
+      centerText(s_botSub, 287, C_MUTED, 1);
   } else {
     drawHintBar("remove tag to stop");
   }
 }
 
 void drawPlaybackVolumeOverlay(int level) {
-  const int barX = 55, barY = 283, barW = 172, barH = 15;
+  // Center bar vertically in the 80px bottom area (y=240..319, center=280)
+  const int barX = 55, barY = 273, barW = 172, barH = 14;
 
   if (s_playbackVolDrawn < 0) {
     // Replace the bottom text section (y=240–319)
@@ -395,7 +430,7 @@ void drawPlaybackVolumeOverlay(int level) {
 
     gfx.setTextColor(C_TEXT);
     gfx.setTextSize(2);
-    gfx.setCursor(8, 285);
+    gfx.setCursor(8, barY);
     gfx.print("VOL");
 
     gfx.drawRect(barX - 1, barY - 1, barW + 2, barH + 2, C_LINE);
