@@ -590,7 +590,9 @@ static void handleImg() {
 // ================================================================
 
 static String lastUploadedFile;
+static String uploadPath;
 static bool   lastUploadOK = false;
+static bool   uploadWriteError = false;
 
 static void handleUpload() {
   HTTPUpload &up = server.upload();
@@ -598,6 +600,12 @@ static void handleUpload() {
 
   if (up.status == UPLOAD_FILE_START) {
     lastUploadOK = false;
+    if (uploadFile) {
+      uploadFile.close();
+      if (uploadWriteError)
+        SD.remove(uploadPath);
+    }
+    uploadWriteError = false;
     String name = up.filename;
     // Sanitize filename
     for (size_t i = 0; i < name.length(); i++) {
@@ -605,20 +613,30 @@ static void handleUpload() {
       if (!isalnum(c) && c != '-' && c != '_' && c != '.')
         name[i] = '_';
     }
-    String path = "/music/" + name;
-    uploadFile = SD.open(path, FILE_WRITE);
+    uploadPath = "/music/" + name;
+    uploadFile = SD.open(uploadPath, FILE_WRITE);
     if (uploadFile) {
       lastUploadedFile = name;
     } else {
       lastUploadedFile = "";
     }
   } else if (up.status == UPLOAD_FILE_WRITE) {
-    if (uploadFile)
-      uploadFile.write(up.buf, up.currentSize);
+    if (uploadFile && !uploadWriteError) {
+      size_t written = uploadFile.write(up.buf, up.currentSize);
+      if (written != up.currentSize)
+        uploadWriteError = true;
+    }
   } else if (up.status == UPLOAD_FILE_END) {
     if (uploadFile) {
       uploadFile.close();
-      lastUploadOK = true;
+      if (!uploadWriteError)
+        lastUploadOK = true;
+    }
+  } else if (up.status == UPLOAD_FILE_ABORTED) {
+    if (uploadFile) {
+      uploadFile.close();
+      SD.remove(uploadPath);
+      lastUploadOK = false;
     }
   }
 }
