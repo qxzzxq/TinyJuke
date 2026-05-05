@@ -2,7 +2,7 @@
 
 ## Project overview
 
-RFID-driven audio player. Scan an NFC tag → lookup UID in `tags.json` on SD card → play the mapped WAV file through a MAX98357A I²S amplifier. Built on a Lolin D32 Pro (ESP32) with Arduino framework on PlatformIO.
+RFID-driven audio player. Scan an NFC tag → lookup UID in `tags.json` on SD card → play the mapped WAV file through a MAX98357A I²S amplifier. Built on a Lolin D32 Pro (ESP32) with Arduino framework on PlatformIO. Display: ST7789V 240×320.
 
 **Status:** Milestone 2 complete — web-based tag management, runtime volume control, encoder-driven GUI all functional.
 
@@ -13,7 +13,7 @@ RFID-driven audio player. Scan an NFC tag → lookup UID in `tags.json` on SD ca
 | 4    | SD_CS             |                                          |
 | 14   | TFT_CS            |                                          |
 | 18   | SCK (VSPI)        | Shared: TFT SCL + SD_SCK                 |
-| 19   | MISO (VSPI)       | SD only (ST7735S is write-only)          |
+| 19   | MISO (VSPI)       | SD only (ST7789V is write-only)          |
 | 23   | MOSI (VSPI)       | Shared: TFT SDA + SD_MOSI                |
 | 27   | TFT_DC            |                                          |
 | 32   | TFT_BL            |                                          |
@@ -46,7 +46,7 @@ KY-040 encoder: CLK→GPIO36, DT→GPIO5, SW→GPIO34, +→3.3V, GND→GND. GPIO
 src/
 ├── config.h          — Pin definitions, colors, D32 Pro macro fix
 ├── audio.h/.cpp      — WavHeader, WavMeta, playWav(), stopPlayback(), parseWavMeta()
-├── screen.h/.cpp     — TFT draw functions (extern gfx, uses C_ color constants)
+├── screen.h/.cpp     — TFT draw functions for 240×320 (extern gfx, uses C_ color constants)
 ├── tags.h/.cpp       — tagDoc (JsonDocument), uid formatting, lookupTag()
 ├── encoder.h/.cpp    — Rotary encoder (ISR quadrature, button state machine, volume save/load)
 ├── gui.h/.cpp        — Management mode (menu, volume, web server screens)
@@ -62,7 +62,7 @@ README.md             — User-facing docs (wiring, build steps, SD layout)
 
 | Library          | Source                                        | Purpose              |
 |------------------|-----------------------------------------------|----------------------|
-| Arduino_GFX      | `moononournation/Arduino_GFX.git`             | TFT display (ST7735) |
+| Arduino_GFX      | `moononournation/Arduino_GFX.git`             | TFT display (ST7789) |
 | ArduinoJson      | `bblanchon/ArduinoJson @ ^7`                  | Parse `/tags.json`   |
 | PN532 + PN532_HSU| Bundled in `lib/`                             | NFC reader           |
 | SD               | Built-in (Arduino ESP32 framework)            | SD card access       |
@@ -109,7 +109,7 @@ WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, d
 
 ```
 /
-├── img/                # Album art (BMP, 24-bit, auto-scaled to 128×128)
+├── img/                # Album art (BMP, 24-bit, auto-scaled to 240×240)
 │   └── album1.bmp
 ├── music/              # WAV files (standard PCM, any sample rate)
 │   └── song.wav
@@ -151,9 +151,9 @@ Board: `lolin_d32_pro`, framework: `arduino`, CPU: 240 MHz.
 ## Known constraints
 
 - **D32 Pro `SS` macro conflict:** `pins_arduino.h` defines `#define SS TF_CS` (→ `#define SS 4`). Libraries that use `SS` as a parameter name will fail to compile. Avoid libraries affected by this, or `#undef SS` before including them.
-- **TFT macros conflict:** D32 Pro variant pre-defines `TFT_CS=14`, `TFT_DC=27`, `TFT_RST=33`. `config.h` includes `<Arduino.h>` first, then `#undef`s the variant values, then redefines ours.
+- **TFT macros conflict:** D32 Pro variant pre-defines `TFT_CS=14`, `TFT_DC=27`, `TFT_RST=33`.
 - **I2S uses legacy driver:** The `driver/i2s.h` API is deprecated in ESP-IDF 5.x. It works but emits warnings. Migration to `i2s_std.h` is a future task.
 - **Single audio track at a time:** No crossfade or queue. Scanning a new tag stops the current track. Tag must be removed before a new tag is accepted.
 - **WAV only:** Standard PCM WAV (16/24-bit, mono/stereo, any sample rate). No MP3/FLAC support.
 - **Web server uses AP mode:** `WIFI_SSID` / `WIFI_PASSWORD` from config.h. Exposes REST API (`/api/tags`, `/api/files`, `/api/images`, `/upload`) and serves a single-page web app for tag management.
-- **Heap is tight:** BMP loader allocates `128×128×2` bytes (32 KB), `playWav()` allocates a 2 KB DMA buffer. Avoid additional large heap allocations; prefer stack or static buffers where possible.
+- **Heap is tight:** BMP loader allocates `240×240×2` bytes (115 KB), `playWav()` allocates a 2 KB DMA buffer. Avoid additional large heap allocations; prefer stack or static buffers where possible.

@@ -5,7 +5,7 @@
 #include <Arduino_GFX_Library.h>
 
 // gfx object is defined in main.cpp — screen functions reference it.
-extern Arduino_ST7735 gfx;
+extern Arduino_ST7789 gfx;
 
 void drawWaitingScreen();
 void drawTagScreen(const uint8_t *uid, uint8_t uidLen);

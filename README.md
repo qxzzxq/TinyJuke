@@ -11,7 +11,7 @@ An RFID-driven jukebox built around an ESP32. Scan an NFC tag to play the linked
 | Audio amplifier   | MAX98357A (I²S class-D)          | Mono                                 |
 | Speaker           | 4 Ω, 3 W, mono                   | Driven directly from MAX98357A       |
 | Storage           | microSD card (FAT32)             | In the D32 Pro's onboard slot        |
-| Display           | 1.8" TFT, 128×160                | ST7735S driver, SPI               |
+| Display           | 2.0" TFT, 240×320                | ST7789V driver, SPI               |
 
 ## Wiring
 
@@ -47,7 +47,7 @@ Set the PN532's DIP switches to HSU mode (SEL0 = 0, SEL1 = 0). Note that TX on o
 
 ### TFT display (SPI, on-board TFT port)
 
-The ST7735S display connects via the D32 Pro's on-board 10-pin SH 1.0 TFT port. It shares the VSPI bus with the onboard microSD card — both use Arduino's bare-metal SPI (same `_spi_bus_array`), separated by their CS pins.
+The ST7789V display connects via the D32 Pro's on-board 10-pin SH 1.0 TFT port. It shares the VSPI bus with the onboard microSD card — both use Arduino's bare-metal SPI (same `_spi_bus_array`), separated by their CS pins.
 
 | TFT pin | ESP32 GPIO | Notes                         |
 |---------|------------|-------------------------------|
@@ -60,7 +60,7 @@ The ST7735S display connects via the D32 Pro's on-board 10-pin SH 1.0 TFT port. 
 | VDD     | 3.3V       |                               |
 | GND     | GND        |                               |
 
-The SD card MISO line (GPIO 19) is not connected to the display — the ST7735S does not output data.
+The SD card MISO line (GPIO 19) is not connected to the display — the ST7789V does not output data.
 
 ### Rotary encoder (KY-040)
 
@@ -112,7 +112,7 @@ Changes are written to `/tags.json` on the SD card immediately.
 
 ```
 /
-├── img/                          # Album art (BMP, 24-bit, auto-scaled to 128×128)
+├── img/                          # Album art (BMP, 24-bit, auto-scaled to 240×240)
 │   └── album1.bmp
 ├── music/                        # WAV audio files
 │   ├── sample-12s.wav
@@ -145,7 +145,7 @@ All fields except `file` are optional. `img` paths are relative to `/img/` on th
 **Libraries:**
 - PN532 + PN532_HSU (bundled in `lib/`, `https://github.com/elechouse/PN532`) — NFC reader
 - `ArduinoJson` (bblanchon) — parsing `tags.json`
-- `Arduino_GFX` (moononournation) — TFT display driver (ST7735)
+- `Arduino_GFX` (moononournation) — TFT display driver (ST7789)
 - WAV audio uses the ESP32's built-in I2S driver (no extra library needed)
 - SD (built-in, Arduino ESP32 framework) — SD card access via SPI
 - WiFi + WebServer (built-in, Arduino ESP32 framework) — AP mode + REST API

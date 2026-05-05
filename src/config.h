@@ -18,7 +18,7 @@
 #define PN532_TX 22  // PN532 TX → ESP32 RX
 #define PN532_RX 13  // ESP32 TX → PN532 RX
 
-// --- TFT (ST7735S, 128x160, SPI) via D32 Pro on-board TFT port ---
+// --- TFT (ST7789V, 240x320, SPI) via D32 Pro on-board TFT port ---
 #define TFT_CS   14
 #define TFT_DC   27
 #define TFT_RST  33

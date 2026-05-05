@@ -1,6 +1,6 @@
 // ESP Jukebox
 //
-// TFT (ST7735S, 128x160) and SD card share the VSPI bus (GPIO 18/19/23).
+// TFT (ST7789V, 240x320) and SD card share the VSPI bus (GPIO 18/19/23).
 // Arduino_ESP32SPI and the SD library both use bare-metal SPI — only one CS
 // is active at a time.
 //
@@ -25,7 +25,7 @@ PN532_HSU pn532hsu(Serial2);
 PN532      nfc(pn532hsu);
 
 Arduino_ESP32SPI bus(TFT_DC, TFT_CS, TFT_SCK, TFT_MOSI, TFT_MISO, VSPI);
-Arduino_ST7735  gfx(&bus, TFT_RST, 0, false, 128, 160, 0, 0, 0, 0);
+Arduino_ST7789  gfx(&bus, TFT_RST, 0, true, 240, 320, 0, 0, 0, 0);
 
 // --- State ---
 static bool tagPresent = false;

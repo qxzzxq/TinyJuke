@@ -1,10 +1,10 @@
 #include "screen.h"
 #include "tags.h"
 #include "encoder.h"
-#include "audio.h"  // for WavMeta, parseWavMeta
+#include "audio.h"
 #include <SD.h>
 
-// Screen is 128×160 portrait. Text size 2 = ~12px, size 1 = ~6px.
+// Screen is 240×320 portrait. Text size 3 = ~18px, size 2 = ~12px, size 1 = ~6px.
 
 static int16_t textWidth(const char *str) {
   int16_t x1, y1;
@@ -23,15 +23,15 @@ static void centerText(const char *str, int16_t y, uint16_t color, uint8_t size)
 
 static void drawHeader(const char *title, const char *leftHint) {
   gfx.fillScreen(C_BG);
-  gfx.fillRect(0, 0, 128, 22, C_SURFACE);
+  gfx.fillRect(0, 0, gfx.width(), 34, C_SURFACE);
   gfx.setTextColor(C_MUTED);
   gfx.setTextSize(1);
-  gfx.setCursor(4, 3);
+  gfx.setCursor(6, 6);
   gfx.print(leftHint);
   gfx.setTextColor(C_TEXT);
   gfx.setTextSize(2);
   int16_t w = textWidth(title);
-  gfx.setCursor((128 - w) / 2, 4);
+  gfx.setCursor((gfx.width() - w) / 2, 8);
   gfx.print(title);
 }
 
@@ -39,7 +39,7 @@ static void drawHintBar(const char *hint) {
   gfx.setTextColor(C_MUTED);
   gfx.setTextSize(1);
   int16_t w = textWidth(hint);
-  gfx.setCursor((128 - w) / 2, 148);
+  gfx.setCursor((gfx.width() - w) / 2, gfx.height() - 15);
   gfx.print(hint);
 }
 
@@ -60,31 +60,31 @@ static int  s_playbackVolDrawn = -1;
 
 void drawWaitingScreen() {
   gfx.fillScreen(C_BG);
-  centerText("Jukebox", 40, C_TEXT, 2);
-  centerText("scan a tag", 85, C_MUTED, 1);
+  centerText("Jukebox", 100, C_TEXT, 3);
+  centerText("scan a tag", 170, C_MUTED, 2);
   drawHintBar("hold for menu");
 }
 
 void drawTagScreen(const uint8_t *uid, uint8_t uidLen) {
   gfx.fillScreen(C_BG);
-  centerText("TAG", 20, C_ACCENT, 2);
+  centerText("TAG", 50, C_ACCENT, 3);
   char uidStr[64];
   uidToStr(uid, uidLen, uidStr);
-  uint8_t sz = (textWidth(uidStr) > 110) ? 1 : 2;
-  centerText(uidStr, 60, C_TEXT, sz);
+  uint8_t sz = (textWidth(uidStr) > 220) ? 1 : 2;
+  centerText(uidStr, 140, C_TEXT, sz);
 }
 
 void drawUnknownTagScreen(const uint8_t *uid, uint8_t uidLen) {
   gfx.fillScreen(C_BG);
-  centerText("UNKNOWN", 30, C_RED, 2);
+  centerText("UNKNOWN", 60, C_RED, 3);
   char uidStr[64];
   uidToStr(uid, uidLen, uidStr);
-  centerText(uidStr, 65, C_TEXT, 1);
-  centerText("click to dismiss", 100, C_ACCENT, 1);
+  centerText(uidStr, 140, C_TEXT, 1);
+  centerText("click to dismiss", 200, C_ACCENT, 2);
   drawHintBar("hold to dismiss");
 }
 
-// BMP loader (24-bit only, 128x160)
+// BMP loader (24-bit only)
 // Decode a 24-bit BMP, return heap-allocated RGB565 buffer + dimensions.
 // Caller must free(). Returns nullptr on failure.
 static uint16_t *loadBMP(const char *path, int *outW, int *outH) {
@@ -121,7 +121,7 @@ static uint16_t *loadBMP(const char *path, int *outW, int *outH) {
       uint8_t b = row[x * 3];
       uint8_t g = row[x * 3 + 1];
       uint8_t r = row[x * 3 + 2];
-      dst[x] = ((b & 0xF8) << 8) | ((g & 0xFC) << 3) | (r >> 3);
+      dst[x] = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
     }
   }
 
@@ -132,14 +132,16 @@ static uint16_t *loadBMP(const char *path, int *outW, int *outH) {
   return buf;
 }
 
-// Nearest-neighbor scale from src to 128x128 dst buffer.
-static void scaleTo128(const uint16_t *src, int srcW, int srcH, uint16_t *dst) {
-  for (int dy = 0; dy < 128; dy++) {
-    int sy = dy * srcH / 128;
+// Nearest-neighbor scale from src to ART_SZ×ART_SZ dst buffer.
+static const int ART_SZ = 240;
+
+static void scaleToArt(const uint16_t *src, int srcW, int srcH, uint16_t *dst) {
+  for (int dy = 0; dy < ART_SZ; dy++) {
+    int sy = dy * srcH / ART_SZ;
     const uint16_t *srcRow = src + sy * srcW;
-    uint16_t *dstRow = dst + dy * 128;
-    for (int dx = 0; dx < 128; dx++)
-      dstRow[dx] = srcRow[dx * srcW / 128];
+    uint16_t *dstRow = dst + dy * ART_SZ;
+    for (int dx = 0; dx < ART_SZ; dx++)
+      dstRow[dx] = srcRow[dx * srcW / ART_SZ];
   }
 }
 
@@ -150,7 +152,7 @@ void drawNowPlayingScreen(const TagInfo &tag) {
 
   // ---- load image ----
   uint16_t *rawBmp = nullptr;
-  uint16_t *scaled = (uint16_t *)malloc(128 * 128 * 2);
+  uint16_t *scaled = (uint16_t *)malloc(ART_SZ * ART_SZ * 2);
   int bmpW = 0, bmpH = 0;
   bool hasImg = false;
 
@@ -162,7 +164,7 @@ void drawNowPlayingScreen(const TagInfo &tag) {
       snprintf(bmpPath, sizeof(bmpPath), "/img/%s", tag.img);
     rawBmp = loadBMP(bmpPath, &bmpW, &bmpH);
     if (rawBmp) {
-      scaleTo128(rawBmp, bmpW, bmpH, scaled);
+      scaleToArt(rawBmp, bmpW, bmpH, scaled);
       free(rawBmp);
       hasImg = true;
     }
@@ -194,32 +196,32 @@ void drawNowPlayingScreen(const TagInfo &tag) {
   gfx.fillScreen(C_BG);
 
   if (hasImg) {
-    // 128x128 album art at top, text bar at bottom
-    gfx.draw16bitRGBBitmap(0, 0, scaled, 128, 128);
+    // 240x240 album art at top, text bar at bottom
+    gfx.draw16bitRGBBitmap(0, 0, scaled, ART_SZ, ART_SZ);
 
-    // Text area: y=128..159 (32px)
-    gfx.fillRect(0, 128, 128, 32, C_SURFACE);
-    gfx.fillRect(0, 128, 128, 1, C_ACCENT);
+    // Text area: y=240..319 (80px)
+    gfx.fillRect(0, 240, gfx.width(), 80, C_SURFACE);
+    gfx.fillRect(0, 240, gfx.width(), 1, C_ACCENT);
 
     const char *line1 = title ? title : fallback;
     char buf[64];
     int16_t tw = textWidth(line1);
-    if (tw > 122) {
+    if (tw > 230) {
       strncpy(buf, line1, 19); buf[19] = '\0'; strcat(buf, "...");
-      centerText(buf, 132, C_TEXT, 1);
+      centerText(buf, 250, C_TEXT, 2);
       strncpy(s_botTitle, buf, sizeof(s_botTitle) - 1);
     } else {
-      centerText(line1, 132, C_TEXT, 1);
+      centerText(line1, 250, C_TEXT, 2);
       strncpy(s_botTitle, line1, sizeof(s_botTitle) - 1);
     }
 
     if (artist) {
       if (album) snprintf(buf, sizeof(buf), "%s  \267  %s", artist, album);
       else snprintf(buf, sizeof(buf), "%s", artist);
-      centerText(buf, 146, C_MUTED, 1);
+      centerText(buf, 280, C_MUTED, 1);
       strncpy(s_botSub, buf, sizeof(s_botSub) - 1);
     } else if (album) {
-      centerText(album, 146, C_MUTED, 1);
+      centerText(album, 280, C_MUTED, 1);
       strncpy(s_botSub, album, sizeof(s_botSub) - 1);
     } else {
       s_botSub[0] = '\0';
@@ -228,19 +230,19 @@ void drawNowPlayingScreen(const TagInfo &tag) {
   } else {
     // Text-only layout
     if (title) {
-      centerText("Playing", 20, C_ACCENT, 2);
-      centerText(title, 55, C_TEXT, 1);
-      if (artist) centerText(artist, 68, C_MUTED, 1);
-      if (album)  centerText(album, 80, C_ACCENT, 1);
+      centerText("Playing", 60, C_ACCENT, 3);
+      centerText(title, 150, C_TEXT, 2);
+      if (artist) centerText(artist, 178, C_MUTED, 1);
+      if (album)  centerText(album, 195, C_ACCENT, 1);
     } else {
-      centerText("Playing", 20, C_ACCENT, 2);
+      centerText("Playing", 60, C_ACCENT, 3);
       int16_t w = textWidth(fallback);
-      if (w > 120) {
+      if (w > 220) {
         char trunc[20];
         strncpy(trunc, fallback, 16); trunc[16] = '\0'; strcat(trunc, "...");
-        centerText(trunc, 65, C_TEXT, 1);
+        centerText(trunc, 160, C_TEXT, 2);
       } else {
-        centerText(fallback, 65, C_TEXT, (w > 60) ? 1 : 2);
+        centerText(fallback, 160, C_TEXT, (w > 120) ? 2 : 3);
       }
     }
     drawHintBar("remove tag to stop");
@@ -252,8 +254,8 @@ void drawNowPlayingScreen(const TagInfo &tag) {
 
 void drawSDErrorScreen() {
   gfx.fillScreen(C_BG);
-  centerText("SD CARD", 60, C_RED, 2);
-  centerText("NOT FOUND", 85, C_RED, 1);
+  centerText("SD CARD", 130, C_RED, 3);
+  centerText("NOT FOUND", 165, C_RED, 2);
 }
 
 // ================================================================
@@ -264,19 +266,19 @@ static const char *MENU_ITEMS[] = { "Web Server", "Volume" };
 
 void drawMenuScreen(int selected) {
   drawHeader("Menu", "back");
-  const int startY = 36, itemH = 28;
+  const int startY = 50, itemH = 34;
 
   for (int i = 0; i < 2; i++) {
     int y = startY + i * itemH;
     if (i == selected)
-      gfx.fillRect(6, y - 1, 116, itemH - 2, C_SURFACE);
+      gfx.fillRect(10, y - 1, gfx.width() - 20, itemH - 2, C_SURFACE);
 
     gfx.setTextColor(i == selected ? C_ACCENT : C_TEXT);
-    gfx.setTextSize(1);
-    gfx.setCursor(14, y + (itemH - 8) / 2);
+    gfx.setTextSize(2);
+    gfx.setCursor(18, y + (itemH - 14) / 2);
     gfx.print(MENU_ITEMS[i]);
     if (i == selected) {
-      gfx.setCursor(116, y + (itemH - 8) / 2);
+      gfx.setCursor(gfx.width() - 28, y + (itemH - 14) / 2);
       gfx.print(">");
     }
   }
@@ -287,15 +289,12 @@ void drawMenuScreen(int selected) {
 //  Volume screen
 // ================================================================
 
-// Track the last level drawn on screen, so updateVolumeDisplay can
-// do differential updates without flickering. Shared between
-// drawVolumeScreen (initial draw) and updateVolumeDisplay (incremental).
 static int s_volumeDrawn = -1;
 
 void drawVolumeScreen(int level) {
   drawHeader("Volume", "back");
 
-  const int barX = 14, barY = 70, barW = 100, barH = 14;
+  const int barX = 24, barY = 140, barW = 192, barH = 20;
   gfx.fillRect(barX, barY, barW, barH, C_LINE);
   int fillW = (barW - 4) * level / 100;
   if (fillW > 0)
@@ -303,7 +302,7 @@ void drawVolumeScreen(int level) {
 
   char pct[8];
   snprintf(pct, sizeof(pct), "%d%%", level);
-  centerText(pct, 100, C_TEXT, 2);
+  centerText(pct, 180, C_TEXT, 3);
 
   drawHintBar("turn to adjust \267 click to save");
 
@@ -314,40 +313,90 @@ void drawVolumeScreen(int level) {
 //  Web server screen
 // ================================================================
 
+static int s_webDrawn = -1;
+
+void drawWebServerScreen(int connections) {
+  gfx.fillScreen(C_BG);
+  centerText("Web Server", 30, C_ACCENT, 3);
+
+  int y = 62;
+  gfx.setTextSize(1);
+
+  gfx.setTextColor(C_TEXT);
+  gfx.setCursor(12, y); gfx.print("SSID:");
+  gfx.setTextColor(C_ACCENT);
+  gfx.setCursor(52, y); gfx.print(WIFI_SSID);
+
+  y += 22;
+  gfx.setTextColor(C_TEXT);
+  gfx.setCursor(12, y); gfx.print("Pass:");
+  gfx.setTextColor(C_ACCENT);
+  gfx.setCursor(52, y); gfx.print(WIFI_PASSWORD);
+
+  y += 22;
+  gfx.setTextColor(C_TEXT);
+  gfx.setCursor(12, y); gfx.print("URL:");
+  gfx.setTextColor(C_ACCENT);
+  gfx.setCursor(52, y); gfx.print("192.168.4.1");
+
+  y += 36;
+  char conn[24];
+  snprintf(conn, sizeof(conn), "%d web connection(s)", connections);
+  centerText(conn, y, C_TEXT, 2);
+
+  y += 30;
+  gfx.setTextColor(C_MUTED);
+  gfx.setTextSize(1);
+  gfx.setCursor(12, y);   gfx.print("Open in browser");
+  gfx.setCursor(12, y + 14); gfx.print("to manage files & tags");
+
+  drawHintBar("click to stop server");
+  s_webDrawn = connections;
+}
+
+void updateWebConnectionCount(int connections) {
+  if (connections == s_webDrawn) return;
+
+  // Connection count is at y=142 (62+22+22+36), size 2 = ~14px
+  gfx.fillRect(0, 138, gfx.width(), 22, C_BG);
+  char conn[24];
+  snprintf(conn, sizeof(conn), "%d web connection(s)", connections);
+  centerText(conn, 142, C_TEXT, 2);
+  s_webDrawn = connections;
+}
+
 // ================================================================
-//  Playback volume overlay — replaces the bottom text section (y=128–159)
+//  Playback volume overlay — replaces the bottom text section (y=240–319)
 //  during playback. Uses incremental updates to avoid flicker.
 //  On clear, the bottom section is redrawn from saved state.
 // ================================================================
 
-// Redraw just the bottom text section (y=128–159) from saved state.
-// Called by clearPlaybackVolumeOverlay after the 5-second timeout.
 static void redrawNowPlayingBottom() {
   if (s_hasImg) {
-    gfx.fillRect(0, 128, 128, 32, C_SURFACE);
-    gfx.fillRect(0, 128, 128, 1, C_ACCENT);
+    gfx.fillRect(0, 240, gfx.width(), 80, C_SURFACE);
+    gfx.fillRect(0, 240, gfx.width(), 1, C_ACCENT);
 
     if (s_botTitle[0])
-      centerText(s_botTitle, 132, C_TEXT, 1);
+      centerText(s_botTitle, 250, C_TEXT, 2);
 
     if (s_botSub[0])
-      centerText(s_botSub, 146, C_MUTED, 1);
+      centerText(s_botSub, 280, C_MUTED, 1);
   } else {
     drawHintBar("remove tag to stop");
   }
 }
 
 void drawPlaybackVolumeOverlay(int level) {
-  const int barX = 28, barY = 141, barW = 94, barH = 8;
+  const int barX = 40, barY = 290, barW = 180, barH = 10;
 
   if (s_playbackVolDrawn < 0) {
-    // Replace the bottom text section (y=128–159)
-    gfx.fillRect(0, 128, 128, 32, C_SURFACE);
-    gfx.fillRect(0, 128, 128, 1, C_ACCENT);
+    // Replace the bottom text section (y=240–319)
+    gfx.fillRect(0, 240, gfx.width(), 80, C_SURFACE);
+    gfx.fillRect(0, 240, gfx.width(), 1, C_ACCENT);
 
     gfx.setTextColor(C_TEXT);
-    gfx.setTextSize(1);
-    gfx.setCursor(6, 142);
+    gfx.setTextSize(2);
+    gfx.setCursor(12, 265);
     gfx.print("VOL");
 
     gfx.drawRect(barX - 1, barY - 1, barW + 2, barH + 2, C_LINE);
@@ -373,39 +422,37 @@ void clearPlaybackVolumeOverlay() {
 
 // ================================================================
 //  Incremental screen updates — only redraw changed items
-//  No fillScreen() → no flicker on encoder rotation.
 // ================================================================
 
 void updateMenuSelection(int oldSel, int newSel) {
-  const int startY = 36, itemH = 28;
+  const int startY = 50, itemH = 34;
 
   // Deselect old
   int yo = startY + oldSel * itemH;
-  gfx.fillRect(6, yo - 1, 116, itemH - 2, C_BG);
+  gfx.fillRect(10, yo - 1, gfx.width() - 20, itemH - 2, C_BG);
   gfx.setTextColor(C_TEXT);
-  gfx.setTextSize(1);
-  gfx.setCursor(14, yo + (itemH - 8) / 2);
+  gfx.setTextSize(2);
+  gfx.setCursor(18, yo + (itemH - 14) / 2);
   gfx.print(MENU_ITEMS[oldSel]);
 
   // Select new
   int yn = startY + newSel * itemH;
-  gfx.fillRect(6, yn - 1, 116, itemH - 2, C_SURFACE);
+  gfx.fillRect(10, yn - 1, gfx.width() - 20, itemH - 2, C_SURFACE);
   gfx.setTextColor(C_ACCENT);
-  gfx.setTextSize(1);
-  gfx.setCursor(14, yn + (itemH - 8) / 2);
+  gfx.setTextSize(2);
+  gfx.setCursor(18, yn + (itemH - 14) / 2);
   gfx.print(MENU_ITEMS[newSel]);
-  gfx.setCursor(116, yn + (itemH - 8) / 2);
+  gfx.setCursor(gfx.width() - 28, yn + (itemH - 14) / 2);
   gfx.print(">");
 }
 
 void updateVolumeDisplay(int level) {
-  const int barX = 14, barY = 70, barW = 100, barH = 14;
+  const int barX = 24, barY = 140, barW = 192, barH = 20;
   int fillW = (barW - 4) * level / 100;
 
   if (s_volumeDrawn >= 0) {
     int prevFillW = (barW - 4) * s_volumeDrawn / 100;
     if (fillW < prevFillW) {
-      // Volume decreased — only clear the portion that's no longer filled.
       int clearX = barX + 2 + fillW;
       int clearW = prevFillW - fillW;
       gfx.fillRect(clearX, barY + 2, clearW, barH - 4, C_LINE);
@@ -418,54 +465,10 @@ void updateVolumeDisplay(int level) {
     gfx.fillRect(barX + 2, barY + 2, fillW, barH - 4, C_ACCENT);
 
   // Erase and redraw percentage
-  gfx.fillRect(0, 98, 128, 22, C_BG);
+  gfx.fillRect(0, 176, gfx.width(), 26, C_BG);
   char pct[8];
   snprintf(pct, sizeof(pct), "%d%%", level);
-  centerText(pct, 100, C_TEXT, 2);
+  centerText(pct, 180, C_TEXT, 3);
 
   s_volumeDrawn = level;
-}
-
-static int s_webDrawn = -1;
-
-void drawWebServerScreen(int connections) {
-  gfx.fillScreen(C_BG);
-  centerText("Web Server", 18, C_ACCENT, 2);
-
-  gfx.setTextSize(1);
-  gfx.setTextColor(C_TEXT);
-  gfx.setCursor(6, 46); gfx.print("SSID:");
-  gfx.setTextColor(C_ACCENT);
-  gfx.setCursor(42, 46); gfx.print(WIFI_SSID);
-
-  gfx.setTextColor(C_TEXT);
-  gfx.setCursor(6, 60); gfx.print("Pass:");
-  gfx.setTextColor(C_ACCENT);
-  gfx.setCursor(42, 60); gfx.print(WIFI_PASSWORD);
-
-  gfx.setTextColor(C_TEXT);
-  gfx.setCursor(6, 74); gfx.print("URL:");
-  gfx.setTextColor(C_ACCENT);
-  gfx.setCursor(42, 74); gfx.print("192.168.4.1");
-
-  char conn[24];
-  snprintf(conn, sizeof(conn), "%d web connection(s)", connections);
-  centerText(conn, 94, C_TEXT, 1);
-
-  gfx.setTextColor(C_MUTED);
-  gfx.setCursor(6, 114); gfx.print("Open in browser");
-  gfx.setCursor(6, 124); gfx.print("to manage files & tags");
-
-  drawHintBar("click to stop server");
-  s_webDrawn = connections;
-}
-
-void updateWebConnectionCount(int connections) {
-  if (connections == s_webDrawn) return;
-
-  gfx.fillRect(0, 92, 128, 16, C_BG);
-  char conn[24];
-  snprintf(conn, sizeof(conn), "%d web connection(s)", connections);
-  centerText(conn, 94, C_TEXT, 1);
-  s_webDrawn = connections;
 }
