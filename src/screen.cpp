@@ -319,25 +319,25 @@ void drawWebServerScreen(int connections) {
   gfx.fillScreen(C_BG);
   centerText("Web Server", 30, C_ACCENT, 3);
 
-  int y = 62;
-  gfx.setTextSize(1);
+  int y = 80;
+  gfx.setTextSize(2);
 
   gfx.setTextColor(C_TEXT);
-  gfx.setCursor(12, y); gfx.print("SSID:");
+  gfx.setCursor(8, y); gfx.print("SSID:");
   gfx.setTextColor(C_ACCENT);
-  gfx.setCursor(52, y); gfx.print(WIFI_SSID);
+  gfx.setCursor(72, y); gfx.print(WIFI_SSID);
 
-  y += 22;
+  y += 26;
   gfx.setTextColor(C_TEXT);
-  gfx.setCursor(12, y); gfx.print("Pass:");
+  gfx.setCursor(8, y); gfx.print("Pass:");
   gfx.setTextColor(C_ACCENT);
-  gfx.setCursor(52, y); gfx.print(WIFI_PASSWORD);
+  gfx.setCursor(72, y); gfx.print(WIFI_PASSWORD);
 
-  y += 22;
+  y += 26;
   gfx.setTextColor(C_TEXT);
-  gfx.setCursor(12, y); gfx.print("URL:");
+  gfx.setCursor(8, y); gfx.print("URL:");
   gfx.setTextColor(C_ACCENT);
-  gfx.setCursor(52, y); gfx.print("192.168.4.1");
+  gfx.setCursor(72, y); gfx.print("192.168.4.1");
 
   y += 36;
   char conn[24];
@@ -346,9 +346,8 @@ void drawWebServerScreen(int connections) {
 
   y += 30;
   gfx.setTextColor(C_MUTED);
-  gfx.setTextSize(1);
-  gfx.setCursor(12, y);   gfx.print("Open in browser");
-  gfx.setCursor(12, y + 14); gfx.print("to manage files & tags");
+  gfx.setTextSize(2);
+  gfx.setCursor(12, y); gfx.print("Open in browser to manage tags");
 
   drawHintBar("click to stop server");
   s_webDrawn = connections;
@@ -357,11 +356,11 @@ void drawWebServerScreen(int connections) {
 void updateWebConnectionCount(int connections) {
   if (connections == s_webDrawn) return;
 
-  // Connection count is at y=142 (62+22+22+36), size 2 = ~14px
-  gfx.fillRect(0, 138, gfx.width(), 22, C_BG);
+  // Connection count is at y=168 (80+26+26+36), size 2 = ~14px
+  gfx.fillRect(0, 164, gfx.width(), 24, C_BG);
   char conn[24];
   snprintf(conn, sizeof(conn), "%d web connection(s)", connections);
-  centerText(conn, 142, C_TEXT, 2);
+  centerText(conn, 168, C_TEXT, 2);
   s_webDrawn = connections;
 }
 
