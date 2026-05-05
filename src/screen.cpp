@@ -265,7 +265,7 @@ void drawSDErrorScreen() {
 static const char *MENU_ITEMS[] = { "Web Server", "Volume" };
 
 void drawMenuScreen(int selected) {
-  drawHeader("Menu", "back");
+  drawHeader("Menu", "");
   const int startY = 50, itemH = 34;
 
   for (int i = 0; i < 2; i++) {
@@ -282,7 +282,7 @@ void drawMenuScreen(int selected) {
       gfx.print(">");
     }
   }
-  drawHintBar("turn \267 click \267 hold");
+  drawHintBar("hold to return");
 }
 
 // ================================================================
