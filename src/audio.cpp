@@ -56,7 +56,7 @@ static bool i2sInit(const WavHeader &hdr) {
 }
 
 static bool parseWavHeader(File &f, WavHeader &hdr) {
-  uint8_t buf[44];
+  uint8_t buf[64];
   if (f.read(buf, 44) != 44) return false;
   if (memcmp(buf, "RIFF", 4) != 0) return false;
   if (memcmp(buf + 8, "WAVE", 4) != 0) return false;
@@ -95,7 +95,7 @@ static bool parseWavHeader(File &f, WavHeader &hdr) {
 
 // ----------------------------------------------------------------
 
-void playWav(const char *filepath, PN532 &nfc) {
+void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t tagUidLen) {
   char path[128];
   if (filepath[0] != '/') {
     path[0] = '/';
@@ -151,7 +151,7 @@ void playWav(const char *filepath, PN532 &nfc) {
     size_t bytesWritten;
     if (i2s_write(I2S_NUM_0, buf, bytesRead, &bytesWritten, pdMS_TO_TICKS(100)) != ESP_OK)
       break;
-    remaining -= bytesRead;
+    remaining -= bytesWritten;
 
     handleWebClient();
 
@@ -178,11 +178,14 @@ void playWav(const char *filepath, PN532 &nfc) {
 
     if (millis() - lastNfcCheck >= 150) {
       lastNfcCheck = millis();
-      uint8_t u[7]; uint8_t uLen;
+      uint8_t u[10]; uint8_t uLen = 0;
       if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 30)) {
         if (++tagAbsentCount >= 3) stopRequested = true;
       } else {
         tagAbsentCount = 0;
+        // Detect tag swap: different UID → stop and let main loop pick up new tag
+        if (uLen != tagUidLen || memcmp(u, tagUid, uLen) != 0)
+          stopRequested = true;
       }
     }
   }

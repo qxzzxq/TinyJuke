@@ -29,6 +29,7 @@ Arduino_ST7789  gfx(&bus, TFT_RST, 0, true, 240, 320, 0, 0, 0, 0);
 
 // --- State ---
 static bool tagPresent = false;
+static char lastTagUid[32] = "";
 
 // ================================================================
 
@@ -161,6 +162,7 @@ void loop() {
 
   if (found && !tagPresent) {
     tagPresent = true;
+    uidToStr(uid, uidLength, lastTagUid);
     Serial.print("Tag UID("); Serial.print(uidLength); Serial.print("): ");
     printHex(uid, uidLength); Serial.println();
 
@@ -169,33 +171,48 @@ void loop() {
       if (tag.file) {
         Serial.print("Playing: "); Serial.println(tag.file);
         drawNowPlayingScreen(tag);
-        playWav(tag.file, nfc);
-        // Quick NFC check to sync tagPresent before redrawing,
-        // so the next loop() iteration doesn't redraw a second time.
+        playWav(tag.file, nfc, uid, uidLength);
+        // Quick NFC check: detect tag removal or tag swap before redrawing
         {
-          uint8_t u[10]; uint8_t uLen;
-          if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 50))
+          uint8_t u[10]; uint8_t uLen = 0;
+          if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 50)) {
             tagPresent = false;
+            lastTagUid[0] = '\0';
+          } else if (uLen <= 10) {
+            char currentUid[32];
+            uidToStr(u, uLen, currentUid);
+            if (strcmp(currentUid, lastTagUid) != 0)
+              tagPresent = false;  // different tag → arrival on next loop
+          }
         }
         drawWaitingScreen();
       } else {
         Serial.println("Unknown tag.");
         drawUnknownTagScreen(uid, uidLength);
+        uidToStr(uid, uidLength, lastTagUid);
         uint32_t t = millis();
         while (millis() - t < 10000) { // 10s timeout
           int eu = readEncoder();
           if (eu == ENC_CLICK || eu == ENC_HOLD) {
             break; // dismiss
           }
-          // Also check for tag removal
-          uint8_t u[10]; uint8_t uLen;
+          // Check for tag removal or swap
+          uint8_t u[10]; uint8_t uLen = 0;
           if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 200)) {
             tagPresent = false;
+            lastTagUid[0] = '\0';
             Serial.println("Tag removed.");
             drawWaitingScreen();
             break;
           }
-          if (uLen > 10) uLen = 10;
+          if (uLen <= 10) {
+            char currentUid[32];
+            uidToStr(u, uLen, currentUid);
+            if (strcmp(currentUid, lastTagUid) != 0) {
+              tagPresent = false;  // different tag → arrival on next loop
+              break;
+            }
+          }
           delay(30);
         }
         if (tagPresent) drawWaitingScreen();
@@ -205,6 +222,7 @@ void loop() {
     }
   } else if (!found && tagPresent) {
     tagPresent = false;
+    lastTagUid[0] = '\0';
     Serial.println("Tag removed.");
     if (audioPlaying) stopPlayback();
     drawWaitingScreen();

@@ -54,3 +54,5 @@ Makefile
 # mac os 
 .DS_Store
 .sd
+
+issues.md

@@ -3,6 +3,7 @@
 #include "encoder.h"
 #include "audio.h"
 #include <SD.h>
+#include <esp_heap_caps.h>
 
 // Screen is 240×320 portrait. Text size 3 = ~18px, size 2 = ~12px, size 1 = ~6px.
 
@@ -136,7 +137,8 @@ static uint16_t *loadBMP(const char *path, int *outW, int *outH) {
   if (w > 600 || ht > 600) { f.close(); return nullptr; } // sanity limit
 
   int pixels = w * ht;
-  uint16_t *buf = (uint16_t *)malloc(pixels * 2);
+  uint16_t *buf = (uint16_t *)heap_caps_malloc(pixels * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!buf) buf = (uint16_t *)malloc(pixels * 2);  // fallback to DRAM
   if (!buf) { f.close(); return nullptr; }
 
   int rowBytes = ((w * bpp + 31) / 32) * 4;
