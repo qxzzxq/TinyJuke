@@ -38,9 +38,9 @@ void setup() {
   delay(200);
   Serial.println("\nESP Jukebox starting...");
 
-  // 1. Init TFT
+  // 1. Init TFT (backlight off until first screen is drawn)
   pinMode(TFT_BL, OUTPUT);
-  digitalWrite(TFT_BL, HIGH);
+  digitalWrite(TFT_BL, LOW);
   gfx.begin();
 
   // 2. Init SD
@@ -69,7 +69,7 @@ void setup() {
     Serial.println("FAILED");
   }
 
-  // 3. Boot screen
+  // 3. Boot screen (drawn before backlight on to avoid init artifacts)
   if (!sdReady) {
     drawSDErrorScreen();
     delay(3000);
@@ -77,6 +77,7 @@ void setup() {
     gfx.fillScreen(C_BG);
     drawWaitingScreen();
   }
+  digitalWrite(TFT_BL, HIGH);
 
   // 4. Init PN532
   Serial2.begin(115200, SERIAL_8N1, PN532_TX, PN532_RX);
@@ -169,6 +170,13 @@ void loop() {
         Serial.print("Playing: "); Serial.println(tag.file);
         drawNowPlayingScreen(tag);
         playWav(tag.file, nfc);
+        // Quick NFC check to sync tagPresent before redrawing,
+        // so the next loop() iteration doesn't redraw a second time.
+        {
+          uint8_t u[10]; uint8_t uLen;
+          if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 50))
+            tagPresent = false;
+        }
         drawWaitingScreen();
       } else {
         Serial.println("Unknown tag.");
