@@ -387,7 +387,7 @@ static void redrawNowPlayingBottom() {
 }
 
 void drawPlaybackVolumeOverlay(int level) {
-  const int barX = 40, barY = 290, barW = 180, barH = 10;
+  const int barX = 55, barY = 283, barW = 172, barH = 15;
 
   if (s_playbackVolDrawn < 0) {
     // Replace the bottom text section (y=240–319)
@@ -396,7 +396,7 @@ void drawPlaybackVolumeOverlay(int level) {
 
     gfx.setTextColor(C_TEXT);
     gfx.setTextSize(2);
-    gfx.setCursor(12, 265);
+    gfx.setCursor(8, 285);
     gfx.print("VOL");
 
     gfx.drawRect(barX - 1, barY - 1, barW + 2, barH + 2, C_LINE);
