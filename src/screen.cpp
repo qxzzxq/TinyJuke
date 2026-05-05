@@ -433,7 +433,7 @@ void drawPlaybackVolumeOverlay(int level) {
     gfx.setCursor(8, barY);
     gfx.print("VOL");
 
-    gfx.drawRect(barX - 1, barY - 1, barW + 2, barH + 2, C_LINE);
+    gfx.fillRect(barX, barY, barW, barH, C_LINE);
   }
 
   // Incremental bar fill
@@ -442,7 +442,7 @@ void drawPlaybackVolumeOverlay(int level) {
   int prevFillW = (s_playbackVolDrawn >= 0) ? innerW * s_playbackVolDrawn / 100 : 0;
 
   if (fillW < prevFillW)
-    gfx.fillRect(barX + 2 + fillW, barY + 2, prevFillW - fillW, barH - 4, C_SURFACE);
+    gfx.fillRect(barX + 2 + fillW, barY + 2, prevFillW - fillW, barH - 4, C_LINE);
   else if (fillW > prevFillW)
     gfx.fillRect(barX + 2 + prevFillW, barY + 2, fillW - prevFillW, barH - 4, C_ACCENT);
 
