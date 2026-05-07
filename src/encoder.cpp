@@ -1,4 +1,5 @@
 #include "encoder.h"
+#include "tags.h"
 #include <SD.h>
 
 int volumeLevel = VOLUME_DEFAULT;
@@ -111,6 +112,7 @@ int readEncoder() {
 }
 
 void saveVolume() {
+  if (!sdReady) return;
   if (SD.exists("/volume.cfg")) SD.remove("/volume.cfg");
   File f = SD.open("/volume.cfg", FILE_WRITE);
   if (f) {
