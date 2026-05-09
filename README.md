@@ -81,6 +81,8 @@ The KY-040 module has built-in 10k pull-up resistors. GPIO 34 and 36 are input-o
 - **Click (short press)** — save volume (jukebox) or select/confirm (menu)
 - **Hold (long press, >600ms)** — enter management menu (jukebox) or go back (menu)
 
+The menu provides access to **Web Server**, **Volume**, and **Brightness** settings. Brightness uses a white bar (same layout as volume) and is persisted to `/brightness.cfg`.
+
 MAX98357A configuration pins:
 - **GAIN** — tie to GND for 12 dB and control volume in software. Leaving the pin floating is unreliable (high-impedance input, noise can produce random gain at power-up).
 - **SD / Mode** — leave floating for (L+R)/2 mono mix, or tie to GND for left-channel only.
@@ -118,7 +120,8 @@ Changes are written to `/tags.json` on the SD card immediately.
 │   ├── sample-12s.wav
 │   └── gc_22k.wav
 ├── tags.json                     # UID → file + metadata mapping
-└── volume.cfg                    # Persisted volume level (plain text, 0–100)
+├── volume.cfg                    # Persisted volume level (plain text, 0–100)
+└── brightness.cfg                # Persisted brightness level (plain text, 0–100)
 ```
 
 `tags.json` maps each tag UID to a music file. Optional fields provide album art and metadata:

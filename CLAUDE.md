@@ -16,7 +16,7 @@ RFID-driven audio player. Scan an NFC tag → lookup UID in `tags.json` on SD ca
 | 19   | MISO (VSPI)       | SD only (ST7789V is write-only)          |
 | 23   | MOSI (VSPI)       | Shared: TFT SDA + SD_MOSI                |
 | 27   | TFT_DC            |                                          |
-| 32   | TFT_BL            |                                          |
+| 32   | TFT_BL            | LEDC PWM (brightness control)          |
 | 33   | TFT_RST           |                                          |
 | 13   | PN532_RX (ESP TX) | ESP32 TX → PN532 RX                     |
 | 22   | PN532_TX (ESP RX) | PN532 TX → ESP32 GPIO 22 (UART2 RX)     |
@@ -28,7 +28,7 @@ RFID-driven audio player. Scan an NFC tag → lookup UID in `tags.json` on SD ca
 | 34   | ENC_SW            | Input-only (external pull-up on module)  |
 | 35   | VBAT              | Unused                                   |
 
-MAX98357A config: GAIN → GND (12 dB), SD/Mode → float (mono mix). Volume is software-controlled via encoder (runtime adjustable, persisted to `/volume.cfg` on SD).
+MAX98357A config: GAIN → GND (12 dB), SD/Mode → float (mono mix). Volume is software-controlled via encoder (runtime adjustable, persisted to `/volume.cfg` on SD). Brightness is also software-controlled via encoder (persisted to `/brightness.cfg` on SD).
 
 KY-040 encoder: CLK→GPIO36, DT→GPIO5, SW→GPIO34, +→3.3V, GND→GND. GPIO 34 and 36 are input-only but the module's external 10k pull-up resistors make them work.
 
@@ -44,12 +44,12 @@ KY-040 encoder: CLK→GPIO36, DT→GPIO5, SW→GPIO34, +→3.3V, GND→GND. GPIO
 
 ```
 src/
-├── config.h          — Pin definitions, colors, D32 Pro macro fix
+├── config.h          — Pin definitions, colors, D32 Pro macro fix, brightness/volume defaults
 ├── audio.h/.cpp      — WavHeader, WavMeta, playWav(), stopPlayback(), parseWavMeta()
 ├── screen.h/.cpp     — TFT draw functions for 240×320 (extern gfx, uses C_ color constants)
 ├── tags.h/.cpp       — tagDoc (JsonDocument), uid formatting, lookupTag()
-├── encoder.h/.cpp    — Rotary encoder (ISR quadrature, button state machine, volume save/load)
-├── gui.h/.cpp        — Management mode (menu, volume, web server screens)
+├── encoder.h/.cpp    — Rotary encoder (ISR quadrature, button state machine, volume/brightness save/load)
+├── gui.h/.cpp        — Management mode (menu, volume, brightness, web server screens)
 ├── web.h/.cpp        — WiFi AP, REST API, file upload, SPA HTML page
 └── main.cpp          — Peripherals (bus, gfx, nfc), setup(), loop()
 platformio.ini        — PlatformIO project config + library dependencies
@@ -87,9 +87,10 @@ WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, d
 4. PN532 init with firmware version check + raw-byte diagnostic on failure
 5. `nfc.SAMConfig()`, draw waiting screen
 6. `initEncoder()` — loads saved volume from `/volume.cfg`, attaches ISR interrupts for quadrature decoding
+7. `loadBrightness()` + `applyBrightness()` — load saved brightness, apply via LEDC PWM
 
 **loop() state machine:**
-- Management mode active (`guiActive()`) → delegate to `guiLoop()` (menu, volume, web server)
+- Management mode active (`guiActive()`) → delegate to `guiLoop()` (menu, volume, brightness, web server)
 - Jukebox mode: read encoder for volume adjustment (rotation) or save (click) or enter menu (hold)
 - `!tagPresent && found` → tag arrived: lookup UID → draw now-playing → `playWav()` → draw waiting
 - `tagPresent && !found` → tag removed: stop playback → draw waiting
@@ -114,7 +115,8 @@ WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, d
 ├── music/              # WAV files (standard PCM, any sample rate)
 │   └── song.wav
 ├── tags.json           # UID → file + metadata mapping (managed by web UI)
-└── volume.cfg          # Persisted volume level 0–100 (plain text)
+├── volume.cfg          # Persisted volume level 0–100 (plain text)
+└── brightness.cfg      # Persisted brightness level 0–100 (plain text)
 ```
 
 `tags.json` format (only `file` is required):

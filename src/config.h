@@ -44,6 +44,16 @@
 #define VOLUME_DEFAULT 25   // 0–100, default on boot
 #define VOLUME_MAX     100
 
+// --- Brightness ---
+#define BRIGHTNESS_DEFAULT   100
+#define BRIGHTNESS_MIN       2     // prevents total blackout
+#define BRIGHTNESS_CHANNEL   0
+#define BRIGHTNESS_PWM_FREQ  5000
+#define BRIGHTNESS_PWM_RES   8
+
+// --- Menu ---
+#define MENU_ITEM_COUNT      3
+
 // --- Web server ---
 #define WIFI_SSID     "Jukebox-Setup"
 #define WIFI_PASSWORD "12345678"

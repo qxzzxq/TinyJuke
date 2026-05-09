@@ -2,7 +2,8 @@
 #include "tags.h"
 #include <SD.h>
 
-int volumeLevel = VOLUME_DEFAULT;
+int volumeLevel     = VOLUME_DEFAULT;
+int brightnessLevel = BRIGHTNESS_DEFAULT;
 
 // --- Gray-code state machine ---
 // Tracks the full 2-bit quadrature state. Only valid gray-code transitions
@@ -119,4 +120,32 @@ void saveVolume() {
     f.print(volumeLevel);
     f.close();
   }
+}
+
+void loadBrightness() {
+  brightnessLevel = BRIGHTNESS_DEFAULT;
+  if (!sdReady) return;
+  if (SD.exists("/brightness.cfg")) {
+    File f = SD.open("/brightness.cfg", FILE_READ);
+    if (f) {
+      int v = f.readString().toInt();
+      f.close();
+      if (v >= 0 && v <= 100) brightnessLevel = v;
+    }
+  }
+}
+
+void saveBrightness() {
+  if (!sdReady) return;
+  if (SD.exists("/brightness.cfg")) SD.remove("/brightness.cfg");
+  File f = SD.open("/brightness.cfg", FILE_WRITE);
+  if (f) {
+    f.print(brightnessLevel);
+    f.close();
+  }
+}
+
+void applyBrightness() {
+  int duty = map(brightnessLevel, 0, 100, BRIGHTNESS_MIN, 255);
+  ledcWrite(TFT_BL, duty);
 }

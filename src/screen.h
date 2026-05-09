@@ -16,6 +16,7 @@ void drawSDErrorScreen();
 // GUI screens
 void drawMenuScreen(int selected);
 void drawVolumeScreen(int level);
+void drawBrightnessScreen(int level);
 void drawWebServerScreen(int connections);
 
 // Playback volume overlay — shown at bottom during audio playback
@@ -25,4 +26,5 @@ void clearPlaybackVolumeOverlay();
 // Incremental updates — only redraw changed items (no flicker)
 void updateMenuSelection(int oldSel, int newSel);
 void updateVolumeDisplay(int level);
+void updateBrightnessDisplay(int level);
 void updateWebConnectionCount(int connections);

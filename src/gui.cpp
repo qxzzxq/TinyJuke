@@ -10,6 +10,7 @@
 enum class Screen {
   MENU,
   VOLUME,
+  BRIGHTNESS,
   WEB,
 };
 
@@ -29,6 +30,9 @@ static void redraw() {
       break;
     case Screen::VOLUME:
       drawVolumeScreen(volumeLevel);
+      break;
+    case Screen::BRIGHTNESS:
+      drawBrightnessScreen(brightnessLevel);
       break;
     case Screen::WEB:
       drawWebServerScreen(getWebConnectionCount());
@@ -78,6 +82,10 @@ void guiLoop() {
         saveVolume();
         scr = Screen::MENU; menuSel = 1;
         break;
+      case Screen::BRIGHTNESS:
+        saveBrightness();
+        scr = Screen::MENU; menuSel = 2;
+        break;
       case Screen::WEB:
         stopWebServer();
         webRunning = false;
@@ -95,16 +103,17 @@ void guiLoop() {
     case Screen::MENU:
       if (ev > 0 && ev < ENC_CLICK) {
         int prev = menuSel;
-        menuSel = (menuSel + ev) % 2;
+        menuSel = (menuSel + ev) % MENU_ITEM_COUNT;
         updateMenuSelection(prev, menuSel);
       } else if (ev < 0) {
         int prev = menuSel;
-        menuSel = (menuSel + ev % 2 + 2) % 2;
+        menuSel = (menuSel + ev % MENU_ITEM_COUNT + MENU_ITEM_COUNT) % MENU_ITEM_COUNT;
         updateMenuSelection(prev, menuSel);
       } else if (ev == ENC_CLICK) {
         switch (menuSel) {
           case 0: initWebServer(); webRunning = true; scr = Screen::WEB; break;
           case 1: scr = Screen::VOLUME; break;
+          case 2: scr = Screen::BRIGHTNESS; break;
         }
         redraw();
       }
@@ -139,6 +148,40 @@ void guiLoop() {
 
       if (volumeLevel != oldLevel)
         updateVolumeDisplay(volumeLevel);
+      break;
+    }
+
+    // ================ BRIGHTNESS ================
+    case Screen::BRIGHTNESS: {
+      int oldLevel = brightnessLevel;
+
+      for (;;) {
+        if (ev > 0 && ev < ENC_CLICK) {
+          int nv = brightnessLevel + ev;
+          brightnessLevel = (nv > 100) ? 100 : (nv < 0 ? 0 : nv);
+        } else if (ev < 0) {
+          int nv = brightnessLevel + ev;
+          brightnessLevel = (nv < 0) ? 0 : (nv > 100 ? 100 : nv);
+        } else if (ev == ENC_CLICK) {
+          saveBrightness();
+          scr = Screen::MENU; menuSel = 2;
+          redraw();
+          break;
+        }
+        else if (ev == ENC_HOLD) {
+          saveBrightness();
+          scr = Screen::MENU; menuSel = 2;
+          redraw();
+          break;
+        }
+        ev = readEncoder();
+        if (ev == ENC_NONE) break;
+      }
+
+      if (brightnessLevel != oldLevel) {
+        updateBrightnessDisplay(brightnessLevel);
+        applyBrightness();
+      }
       break;
     }
 

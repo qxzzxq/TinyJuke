@@ -298,13 +298,13 @@ void drawSDErrorScreen() {
 //  Menu screen
 // ================================================================
 
-static const char *MENU_ITEMS[] = { "Web Server", "Volume" };
+static const char *MENU_ITEMS[] = { "Web Server", "Volume", "Brightness" };
 
 void drawMenuScreen(int selected) {
   drawHeader("Menu", "");
   const int startY = 50, itemH = 34;
 
-  for (int i = 0; i < 2; i++) {
+  for (int i = 0; i < MENU_ITEM_COUNT; i++) {
     int y = startY + i * itemH;
     if (i == selected)
       gfx.fillRect(10, y - 1, gfx.width() - 20, itemH - 2, C_SURFACE);
@@ -319,6 +319,29 @@ void drawMenuScreen(int selected) {
     }
   }
   drawHintBar("hold to return");
+}
+
+// ================================================================
+//  Brightness screen
+// ================================================================
+
+static int s_brightnessDrawn = -1;
+
+void drawBrightnessScreen(int level) {
+  drawHeader("Brightness", "back");
+
+  const int barX = 24, barY = 140, barW = 192, barH = 20;
+  gfx.fillRect(barX, barY, barW, barH, C_LINE);
+  int fillW = (barW - 4) * level / 100;
+  if (fillW > 0)
+    gfx.fillRect(barX + 2, barY + 2, fillW, barH - 4, C_TEXT);
+
+  char pct[8];
+  snprintf(pct, sizeof(pct), "%d%%", level);
+  centerText(pct, 180, C_TEXT, 3);
+
+  drawHintBar("turn to adjust \267 click to save");
+  s_brightnessDrawn = level;
 }
 
 // ================================================================
@@ -507,4 +530,31 @@ void updateVolumeDisplay(int level) {
   centerText(pct, 180, C_TEXT, 3);
 
   s_volumeDrawn = level;
+}
+
+void updateBrightnessDisplay(int level) {
+  const int barX = 24, barY = 140, barW = 192, barH = 20;
+  int fillW = (barW - 4) * level / 100;
+
+  if (s_brightnessDrawn >= 0) {
+    int prevFillW = (barW - 4) * s_brightnessDrawn / 100;
+    if (fillW < prevFillW) {
+      int clearX = barX + 2 + fillW;
+      int clearW = prevFillW - fillW;
+      gfx.fillRect(clearX, barY + 2, clearW, barH - 4, C_LINE);
+    }
+  } else {
+    gfx.fillRect(barX + 2, barY + 2, barW - 4, barH - 4, C_LINE);
+  }
+
+  if (fillW > 0)
+    gfx.fillRect(barX + 2, barY + 2, fillW, barH - 4, C_TEXT);
+
+  // Erase and redraw percentage
+  gfx.fillRect(0, 176, gfx.width(), 26, C_BG);
+  char pct[8];
+  snprintf(pct, sizeof(pct), "%d%%", level);
+  centerText(pct, 180, C_TEXT, 3);
+
+  s_brightnessDrawn = level;
 }

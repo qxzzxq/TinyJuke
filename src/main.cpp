@@ -39,9 +39,9 @@ void setup() {
   delay(200);
   Serial.println("\nESP Jukebox starting...");
 
-  // 1. Init TFT (backlight off until first screen is drawn)
-  pinMode(TFT_BL, OUTPUT);
-  digitalWrite(TFT_BL, LOW);
+  // 1. Init TFT (backlight at full brightness via LEDC PWM)
+  ledcAttach(TFT_BL, BRIGHTNESS_PWM_FREQ, BRIGHTNESS_PWM_RES);
+  ledcWrite(TFT_BL, 255);
   gfx.begin();
 
   // 2. Init SD
@@ -78,7 +78,7 @@ void setup() {
     gfx.fillScreen(C_BG);
     drawWaitingScreen();
   }
-  digitalWrite(TFT_BL, HIGH);
+  // Backlight already at 255 from step 1
 
   // 3.5 Prime I2S pins so MAX98357A BCLK isn't floating (touch-sensitive)
   i2sPrime();
@@ -124,6 +124,10 @@ void setup() {
 
   // 5. Init encoder (loads saved volume, sets up interrupts)
   initEncoder();
+
+  // 6. Apply saved brightness
+  loadBrightness();
+  applyBrightness();
 }
 
 // ================================================================
