@@ -94,7 +94,7 @@ Each NFC tag UID maps to a single audio file on the SD card. When a tag is scann
 1. Any current playback stops immediately
 2. The file mapped to the scanned UID begins playback from the start
 3. Playback continues until the file ends or the tag is removed
-4. During playback, rotate the encoder to adjust volume (5-second overlay) and click to save
+4. Rotate the encoder to adjust volume (overlay bar appears, auto-saves after 5 seconds of inactivity)
 5. When idle on the waiting screen, the display turns off after the configured sleep timeout (default 15 min). Twist the encoder or scan a tag to wake.
 
 Unknown tags are displayed on screen for 10 seconds with their UID — click or hold the encoder to dismiss. The tag must be removed before a new tag is accepted (hot-swapping is not supported).

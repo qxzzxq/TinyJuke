@@ -30,7 +30,7 @@ Arduino_ST7789  gfx(&bus, TFT_RST, 0, true, 240, 320, 0, 0, 0, 0);
 // --- State ---
 static bool     tagPresent      = false;
 static char     lastTagUid[32]  = "";
-static uint32_t s_lastActivity  = 0;  // millis() of last user interaction
+static uint32_t s_lastActivity    = 0;  // millis() of last user interaction
 
 // --- Sleep helpers (need gfx + nfc in scope) ---
 static void enterSleepMode() {
@@ -191,24 +191,11 @@ void loop() {
     return;
   }
 
-  // --- Jukebox mode: handle encoder for volume / menu entry ---
+  // --- Jukebox mode: handle encoder (menu entry only; volume in playback) ---
   int ev = readEncoder();
 
   if (ev != ENC_NONE) resetActivityTimer();
 
-  if ((ev > 0 && ev < ENC_CLICK) || (ev < 0)) {
-    int steps = (ev > 0) ? ev : -ev;
-    int delta = (ev > 0) ? 1 : -1;
-    while (steps-- > 0) {
-      int next = volumeLevel + delta;
-      if (next < 0 || next > 100) break;
-      volumeLevel = next;
-    }
-  }
-  if (ev == ENC_CLICK) {
-    // Save volume on click when in jukebox mode
-    saveVolume();
-  }
   if (ev == ENC_HOLD) {
     saveVolume();
     guiEnter();

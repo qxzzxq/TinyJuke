@@ -195,10 +195,9 @@ void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t ta
       drawPlaybackVolumeOverlay(volumeLevel);
       volOverlayTimer   = millis();
       volOverlayVisible = true;
-    } else if (enc == ENC_CLICK) {
-      saveVolume();
     }
     if (volOverlayVisible && millis() - volOverlayTimer >= 5000) {
+      saveVolume();
       clearPlaybackVolumeOverlay();
       volOverlayVisible = false;
     }

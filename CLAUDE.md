@@ -94,7 +94,7 @@ WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, d
 - Sleep check: if idle on waiting screen > timeout, enter sleep (display off, backlight off)
 - Sleep state: poll encoder + NFC for wake; on wake restore display and re-sync
 - Management mode active (`guiActive()`) → delegate to `guiLoop()` (menu, volume, brightness, sleep timer, web server)
-- Jukebox mode: read encoder for volume adjustment (rotation) or save (click) or enter menu (hold)
+- Jukebox mode: read encoder for volume (rotation shows overlay, auto-saves after 5s idle) or enter menu (hold)
 - `!tagPresent && found` → tag arrived: lookup UID → draw now-playing → `playWav()` → draw waiting
 - `tagPresent && !found` → tag removed: stop playback → draw waiting
 - Unknown tag: 10-second dismiss screen with click/hold to dismiss or tag removal
@@ -166,3 +166,4 @@ Board: `lolin_d32_pro`, framework: `arduino`, CPU: 240 MHz.
 
 ## Other important remarks
 - **Display artifacts on encoder adjustments** — in incremental update functions (updateVolumeDisplay, updateBrightnessDisplay, updateSleepTimerDisplay), always clear the full text area before drawing the new value. Arduino_GFX `setCursor` positions the top-left of the character cell (NOT the baseline), so text at y=140 with size=3 occupies y=140..163 (24 px). The `fillRect` eraser must span from a few px above the text's y to a few px below y + 8*size. Use generous margins: for size=3 at y, clear from y-8 to y+30.
+- **visual feedback** is important: every interaction (rotating, clicking encoder, insert/remove tag) must have visual feedback.
