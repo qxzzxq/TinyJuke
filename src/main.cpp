@@ -228,11 +228,14 @@ void loop() {
           if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 50)) {
             tagPresent = false;
             lastTagUid[0] = '\0';
+            resetActivityTimer();
           } else if (uLen <= 10) {
             char currentUid[32];
             uidToStr(u, uLen, currentUid);
-            if (strcmp(currentUid, lastTagUid) != 0)
+            if (strcmp(currentUid, lastTagUid) != 0) {
               tagPresent = false;  // different tag → arrival on next loop
+              resetActivityTimer();
+            }
           }
         }
         drawWaitingScreen();
