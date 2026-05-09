@@ -172,11 +172,12 @@ void loop() {
     if (sdReady) {
       TagInfo tag = lookupTag(uid, uidLength);
       if (tag.file) {
-        Serial.print("Playing: "); Serial.println(tag.file);
-        drawNowPlayingScreen(tag);
-        playWav(tag.file, nfc, uid, uidLength);
-        // Quick NFC check: detect tag removal or tag swap before redrawing
-        {
+        // Loop playback while the same tag remains on the reader
+        while (tagPresent) {
+          Serial.print("Playing: "); Serial.println(tag.file);
+          drawNowPlayingScreen(tag);
+          playWav(tag.file, nfc, uid, uidLength);
+          // Quick NFC check: detect tag removal or tag swap before replay
           uint8_t u[10]; uint8_t uLen = 0;
           if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 50)) {
             tagPresent = false;
