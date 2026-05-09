@@ -16,6 +16,8 @@
 // Loaded from /volume.cfg at boot, saved on change.
 extern int volumeLevel;
 extern int brightnessLevel;
+extern int sleepTimerMinutes;
+extern bool sleeping;
 
 void initEncoder();
 int  readEncoder();      // returns ENC_* event, clears after read
@@ -23,3 +25,8 @@ void saveVolume();       // persist volumeLevel to SD card
 void loadBrightness();   // read /brightness.cfg into brightnessLevel
 void saveBrightness();   // persist brightnessLevel to SD card
 void applyBrightness();  // write brightnessLevel to LEDC PWM
+void loadSleepTimer();   // read /sleeptimer.cfg into sleepTimerMinutes
+void saveSleepTimer();   // persist sleepTimerMinutes to SD card
+int  sleepTimerToIndex(int minutes);    // convert minutes to option index (0-4)
+int  sleepTimerToMinutes(int index);    // convert option index to minutes
+void resetActivityTimer(); // reset idle timer (called on user interaction)

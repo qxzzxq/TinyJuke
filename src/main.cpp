@@ -28,8 +28,33 @@ Arduino_ESP32SPI bus(TFT_DC, TFT_CS, TFT_SCK, TFT_MOSI, TFT_MISO, VSPI);
 Arduino_ST7789  gfx(&bus, TFT_RST, 0, true, 240, 320, 0, 0, 0, 0);
 
 // --- State ---
-static bool tagPresent = false;
-static char lastTagUid[32] = "";
+static bool     tagPresent      = false;
+static char     lastTagUid[32]  = "";
+static uint32_t s_lastActivity  = 0;  // millis() of last user interaction
+
+// --- Sleep helpers (need gfx + nfc in scope) ---
+static void enterSleepMode() {
+  gfx.displayOff();
+  ledcWrite(TFT_BL, 0);
+  sleeping = true;
+  Serial.println("Sleep mode entered.");
+}
+
+static void wakeFromSleep() {
+  gfx.displayOn();
+  delay(5);
+  applyBrightness();
+  while (readEncoder() != ENC_NONE) {}  // drain accumulated encoder events
+  nfc.SAMConfig();                       // re-sync PN532 after idle
+  sleeping = false;
+  resetActivityTimer();
+  drawWaitingScreen();
+  Serial.println("Woke from sleep.");
+}
+
+void resetActivityTimer() {
+  s_lastActivity = millis();
+}
 
 // ================================================================
 
@@ -128,11 +153,38 @@ void setup() {
   // 6. Apply saved brightness
   loadBrightness();
   applyBrightness();
+
+  // 7. Load sleep timer, initialize activity timer
+  loadSleepTimer();
+  resetActivityTimer();
 }
 
 // ================================================================
 
 void loop() {
+  // --- Sleep entry check (jukebox mode, idle, no tag, no audio) ---
+  if (!sleeping && sleepTimerMinutes > 0 && !guiActive() && !audioPlaying && !tagPresent) {
+    if (millis() - s_lastActivity >= (uint32_t)sleepTimerMinutes * 60000UL) {
+      enterSleepMode();
+    }
+  }
+
+  // --- Sleep state: poll for wake events only ---
+  if (sleeping) {
+    int ev = readEncoder();
+    if (ev != ENC_NONE) {
+      wakeFromSleep();
+      return;
+    }
+    uint8_t u[10]; uint8_t uLen = 0;
+    if (nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 100)) {
+      wakeFromSleep();
+      return;
+    }
+    delay(50);
+    return;
+  }
+
   // --- Management mode ---
   if (guiActive()) {
     guiLoop();
@@ -141,6 +193,8 @@ void loop() {
 
   // --- Jukebox mode: handle encoder for volume / menu entry ---
   int ev = readEncoder();
+
+  if (ev != ENC_NONE) resetActivityTimer();
 
   if ((ev > 0 && ev < ENC_CLICK) || (ev < 0)) {
     int steps = (ev > 0) ? ev : -ev;
@@ -168,6 +222,7 @@ void loop() {
   if (uidLength > 10) uidLength = 10;
 
   if (found && !tagPresent) {
+    resetActivityTimer();
     tagPresent = true;
     uidToStr(uid, uidLength, lastTagUid);
     Serial.print("Tag UID("); Serial.print(uidLength); Serial.print("): ");
@@ -229,6 +284,7 @@ void loop() {
       drawTagScreen(uid, uidLength);
     }
   } else if (!found && tagPresent) {
+    resetActivityTimer();
     tagPresent = false;
     lastTagUid[0] = '\0';
     Serial.println("Tag removed.");

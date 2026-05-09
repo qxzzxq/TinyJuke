@@ -298,7 +298,7 @@ void drawSDErrorScreen() {
 //  Menu screen
 // ================================================================
 
-static const char *MENU_ITEMS[] = { "Web Server", "Volume", "Brightness" };
+static const char *MENU_ITEMS[] = { "Web Server", "Volume", "Brightness", "Sleep Timer" };
 
 void drawMenuScreen(int selected) {
   drawHeader("Menu", "");
@@ -523,8 +523,8 @@ void updateVolumeDisplay(int level) {
   if (fillW > 0)
     gfx.fillRect(barX + 2, barY + 2, fillW, barH - 4, C_ACCENT);
 
-  // Erase and redraw percentage
-  gfx.fillRect(0, 176, gfx.width(), 26, C_BG);
+  // Erase and redraw percentage (text at y=180, size 3 = 24px tall → 180..203)
+  gfx.fillRect(0, 172, gfx.width(), 38, C_BG);
   char pct[8];
   snprintf(pct, sizeof(pct), "%d%%", level);
   centerText(pct, 180, C_TEXT, 3);
@@ -550,11 +550,40 @@ void updateBrightnessDisplay(int level) {
   if (fillW > 0)
     gfx.fillRect(barX + 2, barY + 2, fillW, barH - 4, C_TEXT);
 
-  // Erase and redraw percentage
-  gfx.fillRect(0, 176, gfx.width(), 26, C_BG);
+  // Erase and redraw percentage (text at y=180, size 3 = 24px tall → 180..203)
+  gfx.fillRect(0, 172, gfx.width(), 38, C_BG);
   char pct[8];
   snprintf(pct, sizeof(pct), "%d%%", level);
   centerText(pct, 180, C_TEXT, 3);
 
   s_brightnessDrawn = level;
+}
+
+// ================================================================
+//  Sleep timer screen
+// ================================================================
+
+static const char *SLEEP_LABELS[] = {"Off", "5 min", "15 min", "30 min", "60 min"};
+
+static int s_sleepDrawn = -1;
+
+void drawSleepTimerScreen(int minutes) {
+  drawHeader("Sleep Timer", "back");
+
+  int idx = sleepTimerToIndex(minutes);
+  centerText(SLEEP_LABELS[idx], 140, C_TEXT, 3);
+
+  drawHintBar("turn to change \267 click to save");
+  s_sleepDrawn = idx;
+}
+
+void updateSleepTimerDisplay(int minutes) {
+  int idx = sleepTimerToIndex(minutes);
+  if (idx == s_sleepDrawn) return;
+
+  // Clear text area with margin (text at y=140, size 3 = 24px tall → 140..163)
+  gfx.fillRect(0, 132, gfx.width(), 40, C_BG);
+  centerText(SLEEP_LABELS[idx], 140, C_TEXT, 3);
+
+  s_sleepDrawn = idx;
 }

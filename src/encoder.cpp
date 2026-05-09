@@ -2,8 +2,10 @@
 #include "tags.h"
 #include <SD.h>
 
-int volumeLevel     = VOLUME_DEFAULT;
-int brightnessLevel = BRIGHTNESS_DEFAULT;
+int volumeLevel      = VOLUME_DEFAULT;
+int brightnessLevel  = BRIGHTNESS_DEFAULT;
+int sleepTimerMinutes = SLEEPTIMER_DEFAULT;
+bool sleeping        = false;
 
 // --- Gray-code state machine ---
 // Tracks the full 2-bit quadrature state. Only valid gray-code transitions
@@ -148,4 +150,48 @@ void saveBrightness() {
 void applyBrightness() {
   int duty = map(brightnessLevel, 0, 100, BRIGHTNESS_MIN, 255);
   ledcWrite(TFT_BL, duty);
+}
+
+// ----------------------------------------------------------------
+//  Sleep timer persistence
+// ----------------------------------------------------------------
+
+static const int SLEEP_VALUES[] = {0, 5, 15, 30, 60};
+static const int SLEEP_COUNT = sizeof(SLEEP_VALUES) / sizeof(SLEEP_VALUES[0]);
+
+void loadSleepTimer() {
+  sleepTimerMinutes = SLEEPTIMER_DEFAULT;
+  if (!sdReady) return;
+  if (SD.exists("/sleeptimer.cfg")) {
+    File f = SD.open("/sleeptimer.cfg", FILE_READ);
+    if (f) {
+      int v = f.readString().toInt();
+      f.close();
+      for (int i = 0; i < SLEEP_COUNT; i++) {
+        if (SLEEP_VALUES[i] == v) { sleepTimerMinutes = v; break; }
+      }
+    }
+  }
+}
+
+void saveSleepTimer() {
+  if (!sdReady) return;
+  if (SD.exists("/sleeptimer.cfg")) SD.remove("/sleeptimer.cfg");
+  File f = SD.open("/sleeptimer.cfg", FILE_WRITE);
+  if (f) {
+    f.print(sleepTimerMinutes);
+    f.close();
+  }
+}
+
+int sleepTimerToIndex(int minutes) {
+  for (int i = 0; i < SLEEP_COUNT; i++)
+    if (SLEEP_VALUES[i] == minutes) return i;
+  return 0;
+}
+
+int sleepTimerToMinutes(int index) {
+  if (index < 0) index = 0;
+  if (index >= SLEEP_COUNT) index = SLEEP_COUNT - 1;
+  return SLEEP_VALUES[index];
 }

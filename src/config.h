@@ -51,8 +51,11 @@
 #define BRIGHTNESS_PWM_FREQ  5000
 #define BRIGHTNESS_PWM_RES   8
 
+// --- Sleep timer ---
+#define SLEEPTIMER_DEFAULT   15    // minutes, 0 = off
+
 // --- Menu ---
-#define MENU_ITEM_COUNT      3
+#define MENU_ITEM_COUNT      4
 
 // --- Web server ---
 #define WIFI_SSID     "Jukebox-Setup"

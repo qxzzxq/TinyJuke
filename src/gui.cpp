@@ -11,6 +11,7 @@ enum class Screen {
   MENU,
   VOLUME,
   BRIGHTNESS,
+  SLEEPTIMER,
   WEB,
 };
 
@@ -33,6 +34,9 @@ static void redraw() {
       break;
     case Screen::BRIGHTNESS:
       drawBrightnessScreen(brightnessLevel);
+      break;
+    case Screen::SLEEPTIMER:
+      drawSleepTimerScreen(sleepTimerMinutes);
       break;
     case Screen::WEB:
       drawWebServerScreen(getWebConnectionCount());
@@ -70,6 +74,7 @@ void guiLoop() {
   // --- Encoder events ---
   int ev = readEncoder();
   if (ev == ENC_NONE) return;
+  resetActivityTimer();  // any interaction resets the idle timer
 
   // --- HOLD = back / cancel (always full redraw) ---
   if (ev == ENC_HOLD) {
@@ -85,6 +90,10 @@ void guiLoop() {
       case Screen::BRIGHTNESS:
         saveBrightness();
         scr = Screen::MENU; menuSel = 2;
+        break;
+      case Screen::SLEEPTIMER:
+        saveSleepTimer();
+        scr = Screen::MENU; menuSel = 3;
         break;
       case Screen::WEB:
         stopWebServer();
@@ -114,6 +123,7 @@ void guiLoop() {
           case 0: initWebServer(); webRunning = true; scr = Screen::WEB; break;
           case 1: scr = Screen::VOLUME; break;
           case 2: scr = Screen::BRIGHTNESS; break;
+          case 3: scr = Screen::SLEEPTIMER; break;
         }
         redraw();
       }
@@ -182,6 +192,42 @@ void guiLoop() {
         updateBrightnessDisplay(brightnessLevel);
         applyBrightness();
       }
+      break;
+    }
+
+    // ================ SLEEPTIMER ================
+    case Screen::SLEEPTIMER: {
+      int oldMinutes = sleepTimerMinutes;
+
+      for (;;) {
+        if (ev > 0 && ev < ENC_CLICK) {
+          int idx = sleepTimerToIndex(sleepTimerMinutes) + ev;
+          while (idx < 0) idx += 5;
+          while (idx >= 5) idx -= 5;
+          sleepTimerMinutes = sleepTimerToMinutes(idx);
+        } else if (ev < 0) {
+          int idx = sleepTimerToIndex(sleepTimerMinutes) + ev;
+          while (idx < 0) idx += 5;
+          while (idx >= 5) idx -= 5;
+          sleepTimerMinutes = sleepTimerToMinutes(idx);
+        } else if (ev == ENC_CLICK) {
+          saveSleepTimer();
+          scr = Screen::MENU; menuSel = 3;
+          redraw();
+          break;
+        }
+        else if (ev == ENC_HOLD) {
+          saveSleepTimer();
+          scr = Screen::MENU; menuSel = 3;
+          redraw();
+          break;
+        }
+        ev = readEncoder();
+        if (ev == ENC_NONE) break;
+      }
+
+      if (sleepTimerMinutes != oldMinutes)
+        updateSleepTimerDisplay(sleepTimerMinutes);
       break;
     }
 

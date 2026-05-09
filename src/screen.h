@@ -17,6 +17,7 @@ void drawSDErrorScreen();
 void drawMenuScreen(int selected);
 void drawVolumeScreen(int level);
 void drawBrightnessScreen(int level);
+void drawSleepTimerScreen(int minutes);
 void drawWebServerScreen(int connections);
 
 // Playback volume overlay — shown at bottom during audio playback
@@ -27,4 +28,5 @@ void clearPlaybackVolumeOverlay();
 void updateMenuSelection(int oldSel, int newSel);
 void updateVolumeDisplay(int level);
 void updateBrightnessDisplay(int level);
+void updateSleepTimerDisplay(int minutes);
 void updateWebConnectionCount(int connections);
