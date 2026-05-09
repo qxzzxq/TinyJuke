@@ -100,12 +100,18 @@ h1{font-size:22px;color:#4ADE80;font-weight:700}
 <div id="upload-panel">
 <label>Select a WAV file to upload to the SD card:</label>
 <input type="file" id="file-input" accept=".wav,.WAV">
+<div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+<button id="btn-upload-start">Start Upload</button>
 <progress id="upload-progress" max="100" value="0"></progress>
+</div>
 </div>
 <div id="upload-img-panel">
 <label>Select an image file (BMP/JPG/PNG) to upload:</label>
 <input type="file" id="img-file-input" accept=".bmp,.jpg,.jpeg,.png">
+<div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+<button id="btn-img-upload-start">Start Upload</button>
 <progress id="upload-img-progress" max="100" value="0"></progress>
+</div>
 </div>
 </div>
 
@@ -342,38 +348,49 @@ var p=document.getElementById('upload-img-panel');
 p.style.display=p.style.display==='none'?'block':'none';
 });
 
-document.getElementById('img-file-input').addEventListener('change',async function(){
-var f=this.files[0];
-if(!f)return;
-var form=new FormData();
-form.append('file',f);
-document.getElementById('upload-img-progress').style.display='block';
-document.getElementById('upload-img-progress').value=0;
+function doUpload(url, file, progEl, onDone){
+var xhr=new XMLHttpRequest();
+xhr.open('POST',url);
+xhr.upload.onprogress=function(e){
+if(e.lengthComputable){progEl.value=Math.round(100*e.loaded/e.total);}
+};
+xhr.onload=function(){
+progEl.value=0;
+progEl.style.display='none';
 try{
-var r=await fetch('/upload-img',{method:'POST',body:form});
-var d=await r.json();
-if(d.ok){toast('Uploaded: '+d.filename,'ok');await loadImages();}
+var d=JSON.parse(xhr.responseText);
+if(d.ok){toast('Uploaded: '+d.filename,'ok');onDone();}
 else{toast(d.error||'Upload failed','err');}
 }catch(e){toast('Upload failed','err');}
-document.getElementById('upload-img-progress').style.display='none';
-this.value='';
+};
+xhr.onerror=function(){
+progEl.value=0;
+progEl.style.display='none';
+toast('Upload failed','err');
+};
+var form=new FormData();
+form.append('file',file);
+progEl.style.display='block';
+progEl.value=0;
+xhr.send(form);
+}
+
+document.getElementById('btn-upload-start').addEventListener('click',function(){
+var inp=document.getElementById('file-input');
+var f=inp.files[0];
+if(!f){toast('Please select a file first','err');return;}
+doUpload('/upload', f, document.getElementById('upload-progress'), function(){
+loadFiles().then(function(){inp.value='';});
+});
 });
 
-document.getElementById('file-input').addEventListener('change',async function(){
-var f=this.files[0];
-if(!f)return;
-var form=new FormData();
-form.append('file',f);
-document.getElementById('upload-progress').style.display='block';
-document.getElementById('upload-progress').value=0;
-try{
-var r=await fetch('/upload',{method:'POST',body:form});
-var d=await r.json();
-if(d.ok){toast('Uploaded: '+d.filename,'ok');await loadFiles();}
-else{toast(d.error||'Upload failed','err');}
-}catch(e){toast('Upload failed','err');}
-document.getElementById('upload-progress').style.display='none';
-this.value='';
+document.getElementById('btn-img-upload-start').addEventListener('click',function(){
+var inp=document.getElementById('img-file-input');
+var f=inp.files[0];
+if(!f){toast('Please select a file first','err');return;}
+doUpload('/upload-img', f, document.getElementById('upload-img-progress'), function(){
+loadImages().then(function(){inp.value='';});
+});
 });
 
 (async function(){
