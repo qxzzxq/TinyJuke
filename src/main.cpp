@@ -80,6 +80,9 @@ void setup() {
   }
   digitalWrite(TFT_BL, HIGH);
 
+  // 3.5 Prime I2S pins so MAX98357A BCLK isn't floating (touch-sensitive)
+  i2sPrime();
+
   // 4. Init PN532
   Serial2.begin(115200, SERIAL_8N1, PN532_TX, PN532_RX);
   nfc.begin();

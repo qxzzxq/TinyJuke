@@ -21,6 +21,7 @@ struct WavHeader {
 extern bool audioPlaying;
 extern bool stopRequested;
 
+void i2sPrime();
 void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t tagUidLen);
 void stopPlayback();
 void parseWavMeta(const char *filepath, WavMeta &meta);
