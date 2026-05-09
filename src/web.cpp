@@ -55,10 +55,10 @@ h1{font-size:22px;color:#4ADE80;font-weight:700}
 #btn-upload{background:#111A2E;color:#eee;border:1px solid #1E293B}
 #btn-upload:hover{background:#1E293B}
 
-#upload-panel{display:none;margin-top:16px;padding:16px;background:#111A2E;border-radius:10px;border:1px solid #1E293B}
-#upload-panel label{font-size:13px;color:#6B7B8D;display:block;margin-bottom:8px}
-#upload-panel input[type=file]{color:#eee;margin-bottom:8px;width:100%}
-#upload-progress{width:100%;height:6px;display:none;accent-color:#4ADE80}
+#upload-panel,#upload-img-panel{display:none;margin-top:16px;padding:16px;background:#111A2E;border-radius:10px;border:1px solid #1E293B}
+#upload-panel label,#upload-img-panel label{font-size:13px;color:#6B7B8D;display:block;margin-bottom:8px}
+#upload-panel input[type=file],#upload-img-panel input[type=file]{color:#eee;margin-bottom:8px;width:100%}
+#upload-progress,#upload-img-progress{width:100%;height:6px;display:none;accent-color:#4ADE80}
 
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:100;padding:16px}
 .modal-box{background:#111A2E;border-radius:12px;width:100%;max-width:420px;max-height:90vh;overflow-y:auto;border:1px solid #1E293B;animation:modalIn .2s ease}
@@ -95,11 +95,17 @@ h1{font-size:22px;color:#4ADE80;font-weight:700}
 <div id="actions">
 <button id="btn-add">+ Add Tag</button>
 <button id="btn-upload">Upload WAV</button>
+<button id="btn-upload-img">Upload Image</button>
 </div>
 <div id="upload-panel">
 <label>Select a WAV file to upload to the SD card:</label>
 <input type="file" id="file-input" accept=".wav,.WAV">
 <progress id="upload-progress" max="100" value="0"></progress>
+</div>
+<div id="upload-img-panel">
+<label>Select an image file (BMP/JPG/PNG) to upload:</label>
+<input type="file" id="img-file-input" accept=".bmp,.jpg,.jpeg,.png">
+<progress id="upload-img-progress" max="100" value="0"></progress>
 </div>
 </div>
 
@@ -331,6 +337,28 @@ var p=document.getElementById('upload-panel');
 p.style.display=p.style.display==='none'?'block':'none';
 });
 
+document.getElementById('btn-upload-img').addEventListener('click',function(){
+var p=document.getElementById('upload-img-panel');
+p.style.display=p.style.display==='none'?'block':'none';
+});
+
+document.getElementById('img-file-input').addEventListener('change',async function(){
+var f=this.files[0];
+if(!f)return;
+var form=new FormData();
+form.append('file',f);
+document.getElementById('upload-img-progress').style.display='block';
+document.getElementById('upload-img-progress').value=0;
+try{
+var r=await fetch('/upload-img',{method:'POST',body:form});
+var d=await r.json();
+if(d.ok){toast('Uploaded: '+d.filename,'ok');await loadImages();}
+else{toast(d.error||'Upload failed','err');}
+}catch(e){toast('Upload failed','err');}
+document.getElementById('upload-img-progress').style.display='none';
+this.value='';
+});
+
 document.getElementById('file-input').addEventListener('change',async function(){
 var f=this.files[0];
 if(!f)return;
@@ -500,10 +528,10 @@ static void handleApiTagPost() {
   }
 
   tagDoc[uid]["file"] = file;
-  if (doc["title"].is<const char*>()  && strlen(doc["title"]))  tagDoc[uid]["title"]  = doc["title"];
-  if (doc["artist"].is<const char*>() && strlen(doc["artist"])) tagDoc[uid]["artist"] = doc["artist"];
-  if (doc["album"].is<const char*>()  && strlen(doc["album"]))  tagDoc[uid]["album"]  = doc["album"];
-  if (doc["img"].is<const char*>()    && strlen(doc["img"]))    tagDoc[uid]["img"]    = doc["img"];
+  if (doc["title"].is<const char*>())   tagDoc[uid]["title"]  = doc["title"];
+  if (doc["artist"].is<const char*>()) tagDoc[uid]["artist"] = doc["artist"];
+  if (doc["album"].is<const char*>())  tagDoc[uid]["album"]  = doc["album"];
+  if (doc["img"].is<const char*>())    tagDoc[uid]["img"]    = doc["img"];
 
   // Remove empty optional fields
   if (tagDoc[uid]["title"].is<const char*>()  && strlen(tagDoc[uid]["title"])  == 0) tagDoc[uid].remove("title");
@@ -586,6 +614,71 @@ static void handleImg() {
 }
 
 // ================================================================
+//  POST /upload-img  →  image file upload (multipart)
+// ================================================================
+
+static String lastUploadedImg;
+static String uploadImgPath;
+static bool   lastUploadImgOK = false;
+static bool   uploadImgWriteError = false;
+
+static void handleUploadImg() {
+  HTTPUpload &up = server.upload();
+  static File uploadFile;
+
+  if (up.status == UPLOAD_FILE_START) {
+    lastUploadImgOK = false;
+    if (uploadFile) {
+      uploadFile.close();
+      if (uploadImgWriteError)
+        SD.remove(uploadImgPath);
+    }
+    uploadImgWriteError = false;
+    String name = up.filename;
+    for (size_t i = 0; i < name.length(); i++) {
+      char c = name[i];
+      if (!isalnum(c) && c != '-' && c != '_' && c != '.')
+        name[i] = '_';
+    }
+    uploadImgPath = "/img/" + name;
+    uploadFile = SD.open(uploadImgPath, FILE_WRITE);
+    if (uploadFile) {
+      lastUploadedImg = name;
+    } else {
+      lastUploadedImg = "";
+    }
+  } else if (up.status == UPLOAD_FILE_WRITE) {
+    if (uploadFile && !uploadImgWriteError) {
+      size_t written = uploadFile.write(up.buf, up.currentSize);
+      if (written != up.currentSize)
+        uploadImgWriteError = true;
+    }
+  } else if (up.status == UPLOAD_FILE_END) {
+    if (uploadFile) {
+      uploadFile.close();
+      if (!uploadImgWriteError)
+        lastUploadImgOK = true;
+      else
+        SD.remove(uploadImgPath);
+    }
+  } else if (up.status == UPLOAD_FILE_ABORTED) {
+    if (uploadFile) {
+      uploadFile.close();
+      SD.remove(uploadImgPath);
+      lastUploadImgOK = false;
+    }
+  }
+}
+
+static void handleUploadImgComplete() {
+  if (lastUploadImgOK && lastUploadedImg.length() > 0) {
+    sendOK("\"filename\":\"" + lastUploadedImg + "\"");
+  } else {
+    sendError(500, "Upload failed — could not write to SD card");
+  }
+}
+
+// ================================================================
 //  POST /upload  →  WAV file upload (multipart)
 // ================================================================
 
@@ -631,6 +724,8 @@ static void handleUpload() {
       uploadFile.close();
       if (!uploadWriteError)
         lastUploadOK = true;
+      else
+        SD.remove(uploadPath);
     }
   } else if (up.status == UPLOAD_FILE_ABORTED) {
     if (uploadFile) {
@@ -687,6 +782,7 @@ void initWebServer() {
   server.on("/api/tag",      HTTP_OPTIONS, handleOptions);
   server.on("/img",          HTTP_GET,    handleImg);
   server.on("/upload",       HTTP_POST,   handleUploadComplete, handleUpload);
+server.on("/upload-img",   HTTP_POST,   handleUploadImgComplete, handleUploadImg);
 
   server.begin();
   Serial.println("Web server started.");
