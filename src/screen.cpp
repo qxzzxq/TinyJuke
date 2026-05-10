@@ -2,6 +2,7 @@
 #include "tags.h"
 #include "encoder.h"
 #include "audio.h"
+#include "timer_logic.h"
 #include <SD.h>
 #include <esp_heap_caps.h>
 
@@ -690,9 +691,8 @@ void drawSleepTimerCountdown(unsigned long remainingMs) {
   gfx.setCursor((gfx.width() - w) / 2, 250);
   gfx.print("Sleep");
 
-  unsigned long totalSec = remainingMs / 1000;
   char buf[8];
-  snprintf(buf, sizeof(buf), "%02lu:%02lu", totalSec / 60, totalSec % 60);
+  formatCountdownMMSS((uint32_t)remainingMs, buf, sizeof(buf));
 
   gfx.setTextColor(C_TEXT);
   gfx.setTextSize(3);
@@ -705,9 +705,8 @@ void updateSleepTimerCountdown(unsigned long remainingMs) {
   // Clear time text generously (size 3 at y=268, ~24px tall → 268..291)
   gfx.fillRect(0, 258, gfx.width(), 42, C_SURFACE);
 
-  unsigned long totalSec = remainingMs / 1000;
   char buf[8];
-  snprintf(buf, sizeof(buf), "%02lu:%02lu", totalSec / 60, totalSec % 60);
+  formatCountdownMMSS((uint32_t)remainingMs, buf, sizeof(buf));
 
   gfx.setTextColor(C_TEXT);
   gfx.setTextSize(3);

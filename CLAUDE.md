@@ -45,14 +45,21 @@ KY-040 encoder: CLK→GPIO36, DT→GPIO5, SW→GPIO34, +→3.3V, GND→GND. GPIO
 ```
 src/
 ├── config.h          — Pin definitions, colors, D32 Pro macro fix, brightness/volume/sleep defaults
-├── audio.h/.cpp      — WavHeader, WavMeta, playWav(), stopPlayback(), parseWavMeta()
+├── audio.h/.cpp      — playWav(), stopPlayback(), parseWavMeta() (SD-backed thin wrappers around wav_parser)
+├── wav_parser.h/.cpp — Pure buffer-based WAV header + LIST/INFO metadata parsers (testable on native)
 ├── screen.h/.cpp     — TFT draw functions for 240×320 (extern gfx, uses C_ color constants)
-├── tags.h/.cpp       — tagDoc (JsonDocument), uid formatting, lookupTag()
+├── tags.h            — TagInfo struct + declarations
+├── tags.cpp          — sdReady, printHex (Arduino/Serial-coupled)
+├── tag_utils.cpp     — tagDoc, uidToStr(), lookupTag() (pure, testable on native)
 ├── encoder.h/.cpp    — Rotary encoder (ISR quadrature, button state machine, volume/brightness/power-save/sleep-timer save/load)
+├── encoder_gray.h    — Pure gray-code transition helper used by the encoder ISR (testable on native)
+├── value_array.h     — Pure helpers for "fixed list of option values" lookups (power-save/sleep-timer)
+├── timer_logic.h     — Pure timer policy: sleepTimerShouldFire / powerSaveShouldSleep / timerRemainingMs / formatCountdownMMSS
 ├── gui.h/.cpp        — Management mode (menu, volume, brightness, power saving, sleep timer, version, web server screens)
 ├── web.h/.cpp        — WiFi AP, REST API, file upload, SPA HTML page
 └── main.cpp          — Peripherals (bus, gfx, nfc), setup(), loop(), sleep/wake logic
-platformio.ini        — PlatformIO project config + library dependencies
+test/test_pure/       — Unity tests for pure logic; runs on host via `pio test -e native`
+platformio.ini        — PlatformIO project config + library dependencies (envs: release, debug, native)
 README.md             — User-facing docs (wiring, build steps, SD layout)
 ```
 
@@ -149,9 +156,16 @@ Paths may or may not start with `/` — `playWav()` prepends it if missing.
 ~/.platformio/penv/bin/pio run -e debug     # build with -DDEV_MODE
 ~/.platformio/penv/bin/pio run -t upload    # flash
 ~/.platformio/penv/bin/pio device monitor   # serial (115200 baud)
+~/.platformio/penv/bin/pio test -e native   # run host-side unit tests
 ```
 
-Board: `lolin_d32_pro`, framework: `arduino`, CPU: 240 MHz, partitions: `huge_app.csv`, `BOARD_HAS_PSRAM` enabled (used by BMP loader). Two PIO environments: `release` (default) and `debug` (`-DDEV_MODE` exposes extra short-timeout options on Power Saving and Sleep Timer screens for testing).
+Board: `lolin_d32_pro`, framework: `arduino`, CPU: 240 MHz, partitions: `huge_app.csv`, `BOARD_HAS_PSRAM` enabled (used by BMP loader). Three PIO environments: `release` (default), `debug` (`-DDEV_MODE` exposes extra short-timeout options on Power Saving and Sleep Timer screens for testing), and `native` (host-only, runs Unity tests in `test/test_pure/` against pure-logic source files — no Arduino/ESP-IDF needed).
+
+## Testing
+
+Pure logic (anything not coupled to SD/I2S/Serial/PN532) is covered by Unity tests in `test/test_pure/test_main.cpp`. The test program `#include`s the pure source files directly (`wav_parser.cpp`, `tag_utils.cpp`, `encoder_gray.h`, `value_array.h`) so the native env doesn't need Arduino stubs. When adding a new pure helper, prefer putting it in a header or pure-only `.cpp` so it stays testable.
+
+What's covered: `uidToStr`, `lookupTag`, `parseWavHeaderBuffer`, `parseWavMetaBuffer`, `grayStep`, `valueToIndex`, `indexToValue`, `sleepTimerShouldFire`, `powerSaveShouldSleep`, `timerRemainingMs`, `formatCountdownMMSS`. What's NOT covered (and needs on-target verification): the I2S setup, the SD-backed `playWav` streaming loop, the encoder ISR + button debounce state machine, the GUI, the web server.
 
 ## Dev workflow
 - create a new branch with appropriate name

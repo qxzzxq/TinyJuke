@@ -2,21 +2,9 @@
 
 #include "config.h"
 #include "encoder.h"  // for volumeLevel
+#include "wav_parser.h"  // WavHeader, WavMeta, buffer-based parsers
 #include <SD.h>
 #include <PN532.h>
-
-struct WavMeta {
-  char title[64];
-  char artist[64];
-};
-
-struct WavHeader {
-  uint16_t channels;
-  uint32_t sampleRate;
-  uint16_t bitsPerSample;
-  uint32_t dataSize;
-  uint32_t dataOffset;
-};
 
 extern bool audioPlaying;
 extern bool stopRequested;

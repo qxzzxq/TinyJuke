@@ -1,6 +1,6 @@
 #pragma once
 
-#include "config.h"
+#include <stdint.h>
 #include <ArduinoJson.h>
 
 struct TagInfo {

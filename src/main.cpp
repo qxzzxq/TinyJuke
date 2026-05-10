@@ -14,6 +14,7 @@
 #include "encoder.h"
 #include "gui.h"
 #include "web.h"
+#include "timer_logic.h"
 
 #include <PN532_HSU.h>
 #include <PN532.h>
@@ -166,8 +167,8 @@ void setup() {
 void loop() {
   // --- Sleep entry check (jukebox mode, idle, no tag, no audio) ---
   // sleepStopped: tag is physically present but playback was stopped by timer — treat as absent
-  if (!sleeping && powerSaveMinutes > 0 && !guiActive() && !audioPlaying && (!tagPresent || sleepStopped)) {
-    if (millis() - s_lastActivity >= (uint32_t)powerSaveMinutes * 60000UL) {
+  if (!sleeping && !guiActive() && !audioPlaying && (!tagPresent || sleepStopped)) {
+    if (powerSaveShouldSleep(powerSaveMinutes, millis() - s_lastActivity)) {
       enterSleepMode();
     }
   }
@@ -231,9 +232,7 @@ void loop() {
           Serial.print("Playing: "); Serial.println(tag.file);
           drawNowPlayingScreen(tag);
           if (sleepTimerMinutes > 0) {
-            unsigned long elapsed = millis() - audioStartTime;
-            unsigned long totalMs = (unsigned long)sleepTimerMinutes * 60000UL;
-            unsigned long remaining = (elapsed < totalMs) ? (totalMs - elapsed) : 0;
+            uint32_t remaining = timerRemainingMs(sleepTimerMinutes, millis() - audioStartTime);
             drawSleepTimerCountdown(remaining);
           }
           playWav(tag.file, nfc, uid, uidLength);
