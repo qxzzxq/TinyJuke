@@ -1,9 +1,12 @@
 #include "audio.h"
 #include "screen.h"
+#include "encoder.h"
 #include <driver/i2s.h>
 
 bool audioPlaying = false;
 bool stopRequested = false;
+bool sleepTimerFired = false;
+uint32_t audioStartTime = 0;
 
 static bool i2sConfigured = false;
 static bool parseWavHeader(File &f, WavHeader &hdr);
@@ -160,6 +163,9 @@ void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t ta
   uint32_t volOverlayTimer = 0;
   bool     volOverlayVisible = false;
 
+  uint32_t lastCountdownUpdate = 0;
+  bool     countdownVisible = (sleepTimerMinutes > 0);
+
   while (remaining > 0 && !stopRequested) {
     size_t toRead = (remaining < readSize) ? (size_t)remaining : readSize;
     size_t bytesRead = f.read(buf, toRead);
@@ -212,6 +218,33 @@ void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t ta
       saveVolume();
       clearPlaybackVolumeOverlay();
       volOverlayVisible = false;
+      if (countdownVisible) {
+        unsigned long elapsed = millis() - audioStartTime;
+        unsigned long totalMs = (unsigned long)sleepTimerMinutes * 60000UL;
+        unsigned long remaining = (elapsed < totalMs) ? (totalMs - elapsed) : 0;
+        drawSleepTimerCountdown(remaining);
+      }
+    }
+
+    // Update countdown every second (skip if volume overlay is active)
+    if (countdownVisible && !volOverlayVisible) {
+      uint32_t now = millis();
+      if (now - lastCountdownUpdate >= 1000) {
+        lastCountdownUpdate = now;
+        unsigned long elapsed = now - audioStartTime;
+        unsigned long totalMs = (unsigned long)sleepTimerMinutes * 60000UL;
+        unsigned long remaining = (elapsed < totalMs) ? (totalMs - elapsed) : 0;
+        updateSleepTimerCountdown(remaining);
+      }
+    }
+
+    // Audio sleep timer: stop playback after configured duration (one-shot)
+    if (sleepTimerMinutes > 0 && millis() - audioStartTime >= (uint32_t)sleepTimerMinutes * 60000UL) {
+      sleepTimerMinutes = 0;
+      saveSleepTimer();
+      sleepTimerFired = true;
+      stopRequested = true;
+      break;
     }
 
     if (millis() - lastNfcCheck >= 150) {

@@ -16,6 +16,7 @@
 // Loaded from /volume.cfg at boot, saved on change.
 extern int volumeLevel;
 extern int brightnessLevel;
+extern int powerSaveMinutes;
 extern int sleepTimerMinutes;
 extern bool sleeping;
 
@@ -25,6 +26,10 @@ void saveVolume();       // persist volumeLevel to SD card
 void loadBrightness();   // read /brightness.cfg into brightnessLevel
 void saveBrightness();   // persist brightnessLevel to SD card
 void applyBrightness();  // write brightnessLevel to LEDC PWM
+void loadPowerSave();    // read /powersave.cfg into powerSaveMinutes
+void savePowerSave();    // persist powerSaveMinutes to SD card
+int  powerSaveToIndex(int minutes);    // convert minutes to option index (0-4)
+int  powerSaveToMinutes(int index);    // convert option index to minutes
 void loadSleepTimer();   // read /sleeptimer.cfg into sleepTimerMinutes
 void saveSleepTimer();   // persist sleepTimerMinutes to SD card
 int  sleepTimerToIndex(int minutes);    // convert minutes to option index (0-4)

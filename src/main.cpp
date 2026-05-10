@@ -29,6 +29,8 @@ Arduino_ST7789  gfx(&bus, TFT_RST, 0, true, 240, 320, 0, 0, 0, 0);
 
 // --- State ---
 static bool     tagPresent      = false;
+static bool     sleepStopped    = false;  // set when sleep timer fires, cleared on tag removal
+static uint8_t  tagAbsentCount  = 0;      // debounce counter for tag removal detection
 static char     lastTagUid[32]  = "";
 static uint32_t s_lastActivity    = 0;  // millis() of last user interaction
 
@@ -153,7 +155,8 @@ void setup() {
   loadBrightness();
   applyBrightness();
 
-  // 7. Load sleep timer, initialize activity timer
+  // 7. Load power save & sleep timer, initialize activity timer
+  loadPowerSave();
   loadSleepTimer();
   resetActivityTimer();
 }
@@ -162,8 +165,9 @@ void setup() {
 
 void loop() {
   // --- Sleep entry check (jukebox mode, idle, no tag, no audio) ---
-  if (!sleeping && sleepTimerMinutes > 0 && !guiActive() && !audioPlaying && !tagPresent) {
-    if (millis() - s_lastActivity >= (uint32_t)sleepTimerMinutes * 60000UL) {
+  // sleepStopped: tag is physically present but playback was stopped by timer — treat as absent
+  if (!sleeping && powerSaveMinutes > 0 && !guiActive() && !audioPlaying && (!tagPresent || sleepStopped)) {
+    if (millis() - s_lastActivity >= (uint32_t)powerSaveMinutes * 60000UL) {
       enterSleepMode();
     }
   }
@@ -175,10 +179,13 @@ void loop() {
       wakeFromSleep();
       return;
     }
-    uint8_t u[10]; uint8_t uLen = 0;
-    if (nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 100)) {
-      wakeFromSleep();
-      return;
+    // Don't wake on NFC if sleep timer stopped playback — tag is still present
+    if (!sleepStopped) {
+      uint8_t u[10]; uint8_t uLen = 0;
+      if (nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 100)) {
+        wakeFromSleep();
+        return;
+      }
     }
     delay(50);
     return;
@@ -207,9 +214,10 @@ void loop() {
   bool found = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, 300);
   if (uidLength > 10) uidLength = 10;
 
-  if (found && !tagPresent) {
+  if (found && !tagPresent && !sleepStopped) {
     resetActivityTimer();
     tagPresent = true;
+    tagAbsentCount = 0;
     uidToStr(uid, uidLength, lastTagUid);
     Serial.print("Tag UID("); Serial.print(uidLength); Serial.print("): ");
     printHex(uid, uidLength); Serial.println();
@@ -218,10 +226,24 @@ void loop() {
       TagInfo tag = lookupTag(uid, uidLength);
       if (tag.file) {
         // Loop playback while the same tag remains on the reader
+        audioStartTime = millis();
         while (tagPresent) {
           Serial.print("Playing: "); Serial.println(tag.file);
           drawNowPlayingScreen(tag);
+          if (sleepTimerMinutes > 0) {
+            unsigned long elapsed = millis() - audioStartTime;
+            unsigned long totalMs = (unsigned long)sleepTimerMinutes * 60000UL;
+            unsigned long remaining = (elapsed < totalMs) ? (totalMs - elapsed) : 0;
+            drawSleepTimerCountdown(remaining);
+          }
           playWav(tag.file, nfc, uid, uidLength);
+          // Sleep timer fired — require tag removal before re-trigger
+          if (sleepTimerFired) {
+            sleepTimerFired = false;
+            sleepStopped = true;
+            resetActivityTimer();
+            break;
+          }
           // Quick NFC check: detect tag removal or tag swap before replay
           uint8_t u[10]; uint8_t uLen = 0;
           if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 50)) {
@@ -273,11 +295,19 @@ void loop() {
       drawTagScreen(uid, uidLength);
     }
   } else if (!found && tagPresent) {
-    resetActivityTimer();
-    tagPresent = false;
-    lastTagUid[0] = '\0';
-    Serial.println("Tag removed.");
-    if (audioPlaying) stopPlayback();
-    drawWaitingScreen();
+    // Debounce: require 3 consecutive misses before accepting removal.
+    // This prevents NFC glitches from resetting sleepStopped and re-triggering playback.
+    if (++tagAbsentCount >= 3) {
+      resetActivityTimer();
+      tagPresent = false;
+      sleepStopped = false;
+      tagAbsentCount = 0;
+      lastTagUid[0] = '\0';
+      Serial.println("Tag removed.");
+      if (audioPlaying) stopPlayback();
+      drawWaitingScreen();
+    }
+  } else if (found && tagPresent) {
+    tagAbsentCount = 0;
   }
 }

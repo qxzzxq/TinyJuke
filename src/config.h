@@ -51,11 +51,30 @@
 #define BRIGHTNESS_PWM_FREQ  5000
 #define BRIGHTNESS_PWM_RES   8
 
-// --- Sleep timer ---
-#define SLEEPTIMER_DEFAULT   15    // minutes, 0 = off
+// --- Dev mode: define DEV_MODE via PlatformIO build_flags (-DDEV_MODE) ---
+// Use `pio run -e debug` to build with DEV_MODE enabled.
+
+// --- Power saving ---
+#define POWERSAVE_DEFAULT   15    // minutes, 0 = off
+#ifdef DEV_MODE
+  #define POWERSAVE_OPTIONS 6
+#else
+  #define POWERSAVE_OPTIONS 5
+#endif
+
+// --- Audio sleep timer ---
+#define SLEEPTIMER_DEFAULT   0     // minutes, 0 = off
+#ifdef DEV_MODE
+  #define SLEEP_OPTIONS     6
+#else
+  #define SLEEP_OPTIONS     5
+#endif
+
+// --- Version ---
+#define VERSION_STRING       "v1.0.0"
 
 // --- Menu ---
-#define MENU_ITEM_COUNT      4
+#define MENU_ITEM_COUNT      6
 
 // --- Web server ---
 #define WIFI_SSID     "Jukebox-Setup"

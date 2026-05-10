@@ -20,6 +20,8 @@ struct WavHeader {
 
 extern bool audioPlaying;
 extern bool stopRequested;
+extern bool sleepTimerFired;
+extern uint32_t audioStartTime;
 
 void i2sPrime();
 void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t tagUidLen);

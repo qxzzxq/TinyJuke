@@ -298,7 +298,7 @@ void drawSDErrorScreen() {
 //  Menu screen
 // ================================================================
 
-static const char *MENU_ITEMS[] = { "Web Server", "Volume", "Brightness", "Sleep Timer" };
+static const char *MENU_ITEMS[] = { "Web Server", "Volume", "Brightness", "Power Saving", "Sleep Timer", "Version" };
 
 void drawMenuScreen(int selected) {
   drawHeader("Menu", "");
@@ -560,10 +560,69 @@ void updateBrightnessDisplay(int level) {
 }
 
 // ================================================================
+//  Power save screen
+// ================================================================
+
+static const char *POWERSAVE_LABELS[] = {
+  "Off",
+#ifdef DEV_MODE
+  "1 min",
+#endif
+  "5 min", "15 min", "30 min", "60 min"
+};
+
+static int s_powerSaveDrawn = -1;
+
+void drawPowerSaveScreen(int minutes) {
+  drawHeader("Power Saving", "back");
+
+  int idx = powerSaveToIndex(minutes);
+  centerText(POWERSAVE_LABELS[idx], 120, C_TEXT, 3);
+
+  gfx.setTextColor(C_MUTED);
+  gfx.setTextSize(1);
+  int16_t lineW;
+  int16_t x1, y1;
+  uint16_t tw, th;
+
+  const char *line1 = "Screen turns off after a";
+  gfx.getTextBounds(line1, 0, 0, &x1, &y1, &tw, &th);
+  lineW = (int16_t)tw;
+  gfx.setCursor((gfx.width() - lineW) / 2, 190);
+  gfx.print(line1);
+
+  const char *line2 = "period of inactivity";
+  gfx.getTextBounds(line2, 0, 0, &x1, &y1, &tw, &th);
+  lineW = (int16_t)tw;
+  gfx.setCursor((gfx.width() - lineW) / 2, 202);
+  gfx.print(line2);
+
+  drawHintBar("turn to change \267 click to save");
+  s_powerSaveDrawn = idx;
+}
+
+void updatePowerSaveDisplay(int minutes) {
+  int idx = powerSaveToIndex(minutes);
+  if (idx == s_powerSaveDrawn) return;
+
+  // Clear text area with margin (text at y=120, size 3 = 24px tall → 120..143)
+  gfx.fillRect(0, 112, gfx.width(), 40, C_BG);
+  centerText(POWERSAVE_LABELS[idx], 120, C_TEXT, 3);
+
+  s_powerSaveDrawn = idx;
+}
+
+// ================================================================
 //  Sleep timer screen
 // ================================================================
 
-static const char *SLEEP_LABELS[] = {"Off", "5 min", "15 min", "30 min", "60 min"};
+static const char *SLEEP_LABELS[] = {
+  "Off",
+#ifdef DEV_MODE
+  "1 min",
+#endif
+  "15 min", "30 min", "60 min", "120 min"
+};
 
 static int s_sleepDrawn = -1;
 
@@ -586,4 +645,73 @@ void updateSleepTimerDisplay(int minutes) {
   centerText(SLEEP_LABELS[idx], 140, C_TEXT, 3);
 
   s_sleepDrawn = idx;
+}
+
+// ================================================================
+//  Version screen
+// ================================================================
+
+void drawVersionScreen() {
+  drawHeader("Version", "back");
+
+  gfx.setTextColor(C_TEXT);
+  gfx.setTextSize(3);
+  int16_t w = textWidth(VERSION_STRING);
+  gfx.setCursor((gfx.width() - w) / 2, 100);
+  gfx.print(VERSION_STRING);
+
+  const char *mode =
+#ifdef DEV_MODE
+      "dev";
+#else
+      "release";
+#endif
+
+  gfx.setTextColor(C_ACCENT);
+  gfx.setTextSize(3);
+  w = textWidth(mode);
+  gfx.setCursor((gfx.width() - w) / 2, 140);
+  gfx.print(mode);
+
+  drawHintBar("click or hold to return");
+}
+
+// ================================================================
+//  Sleep timer countdown — replaces bottom section during playback
+// ================================================================
+
+void drawSleepTimerCountdown(unsigned long remainingMs) {
+  gfx.fillRect(0, 240, gfx.width(), 80, C_SURFACE);
+  gfx.fillRect(0, 240, gfx.width(), 1, C_ACCENT);
+
+  gfx.setTextColor(C_MUTED);
+  gfx.setTextSize(1);
+  int16_t w = textWidth("Sleep");
+  gfx.setCursor((gfx.width() - w) / 2, 250);
+  gfx.print("Sleep");
+
+  unsigned long totalSec = remainingMs / 1000;
+  char buf[8];
+  snprintf(buf, sizeof(buf), "%02lu:%02lu", totalSec / 60, totalSec % 60);
+
+  gfx.setTextColor(C_TEXT);
+  gfx.setTextSize(3);
+  w = textWidth(buf);
+  gfx.setCursor((gfx.width() - w) / 2, 268);
+  gfx.print(buf);
+}
+
+void updateSleepTimerCountdown(unsigned long remainingMs) {
+  // Clear time text generously (size 3 at y=268, ~24px tall → 268..291)
+  gfx.fillRect(0, 258, gfx.width(), 42, C_SURFACE);
+
+  unsigned long totalSec = remainingMs / 1000;
+  char buf[8];
+  snprintf(buf, sizeof(buf), "%02lu:%02lu", totalSec / 60, totalSec % 60);
+
+  gfx.setTextColor(C_TEXT);
+  gfx.setTextSize(3);
+  int16_t w = textWidth(buf);
+  gfx.setCursor((gfx.width() - w) / 2, 268);
+  gfx.print(buf);
 }

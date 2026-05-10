@@ -4,6 +4,7 @@
 
 int volumeLevel      = VOLUME_DEFAULT;
 int brightnessLevel  = BRIGHTNESS_DEFAULT;
+int powerSaveMinutes = POWERSAVE_DEFAULT;
 int sleepTimerMinutes = SLEEPTIMER_DEFAULT;
 bool sleeping        = false;
 
@@ -153,10 +154,66 @@ void applyBrightness() {
 }
 
 // ----------------------------------------------------------------
-//  Sleep timer persistence
+//  Power saving persistence (screen off after idle)
 // ----------------------------------------------------------------
 
-static const int SLEEP_VALUES[] = {0, 5, 15, 30, 60};
+static const int POWERSAVE_VALUES[] = {
+  0,
+#ifdef DEV_MODE
+  1,
+#endif
+  5, 15, 30, 60
+};
+static const int POWERSAVE_COUNT = sizeof(POWERSAVE_VALUES) / sizeof(POWERSAVE_VALUES[0]);
+
+void loadPowerSave() {
+  powerSaveMinutes = POWERSAVE_DEFAULT;
+  if (!sdReady) return;
+  if (SD.exists("/powersave.cfg")) {
+    File f = SD.open("/powersave.cfg", FILE_READ);
+    if (f) {
+      int v = f.readString().toInt();
+      f.close();
+      for (int i = 0; i < POWERSAVE_COUNT; i++) {
+        if (POWERSAVE_VALUES[i] == v) { powerSaveMinutes = v; break; }
+      }
+    }
+  }
+}
+
+void savePowerSave() {
+  if (!sdReady) return;
+  if (SD.exists("/powersave.cfg")) SD.remove("/powersave.cfg");
+  File f = SD.open("/powersave.cfg", FILE_WRITE);
+  if (f) {
+    f.print(powerSaveMinutes);
+    f.close();
+  }
+}
+
+int powerSaveToIndex(int minutes) {
+  for (int i = 0; i < POWERSAVE_COUNT; i++)
+    if (POWERSAVE_VALUES[i] == minutes) return i;
+  return 0;
+}
+
+int powerSaveToMinutes(int index) {
+  if (index < 0) index = 0;
+  if (index >= POWERSAVE_COUNT) index = POWERSAVE_COUNT - 1;
+  return POWERSAVE_VALUES[index];
+}
+
+// ----------------------------------------------------------------
+//  Audio sleep timer persistence (stop playback after X minutes)
+// ----------------------------------------------------------------
+
+static const int SLEEP_VALUES[] = {
+  0,
+#ifdef DEV_MODE
+  1,
+#endif
+  15, 30, 60, 120
+};
 static const int SLEEP_COUNT = sizeof(SLEEP_VALUES) / sizeof(SLEEP_VALUES[0]);
 
 void loadSleepTimer() {

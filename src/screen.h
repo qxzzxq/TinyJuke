@@ -17,16 +17,23 @@ void drawSDErrorScreen();
 void drawMenuScreen(int selected);
 void drawVolumeScreen(int level);
 void drawBrightnessScreen(int level);
+void drawPowerSaveScreen(int minutes);
 void drawSleepTimerScreen(int minutes);
+void drawVersionScreen();
 void drawWebServerScreen(int connections);
 
 // Playback volume overlay — shown at bottom during audio playback
 void drawPlaybackVolumeOverlay(int level);
 void clearPlaybackVolumeOverlay();
 
+// Sleep timer countdown — shown in bottom section during playback
+void drawSleepTimerCountdown(unsigned long remainingMs);
+void updateSleepTimerCountdown(unsigned long remainingMs);
+
 // Incremental updates — only redraw changed items (no flicker)
 void updateMenuSelection(int oldSel, int newSel);
 void updateVolumeDisplay(int level);
 void updateBrightnessDisplay(int level);
+void updatePowerSaveDisplay(int minutes);
 void updateSleepTimerDisplay(int minutes);
 void updateWebConnectionCount(int connections);

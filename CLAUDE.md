@@ -28,7 +28,7 @@ RFID-driven audio player. Scan an NFC tag → lookup UID in `tags.json` on SD ca
 | 34   | ENC_SW            | Input-only (external pull-up on module)  |
 | 35   | VBAT              | Unused                                   |
 
-MAX98357A config: GAIN → GND (12 dB), SD/Mode → float (mono mix). Volume is software-controlled via encoder (runtime adjustable, persisted to `/volume.cfg` on SD). Brightness is also software-controlled via encoder (persisted to `/brightness.cfg` on SD). Sleep timer (persisted to `/sleeptimer.cfg`) turns off the display after idle timeout.
+MAX98357A config: GAIN → GND (12 dB), SD/Mode → float (mono mix). Volume is software-controlled via encoder (runtime adjustable, persisted to `/volume.cfg` on SD). Brightness is also software-controlled via encoder (persisted to `/brightness.cfg` on SD). Power saving (persisted to `/powersave.cfg`) turns off the display after idle timeout. Audio sleep timer (persisted to `/sleeptimer.cfg`) stops playback after the configured duration.
 
 KY-040 encoder: CLK→GPIO36, DT→GPIO5, SW→GPIO34, +→3.3V, GND→GND. GPIO 34 and 36 are input-only but the module's external 10k pull-up resistors make them work.
 
@@ -49,7 +49,7 @@ src/
 ├── screen.h/.cpp     — TFT draw functions for 240×320 (extern gfx, uses C_ color constants)
 ├── tags.h/.cpp       — tagDoc (JsonDocument), uid formatting, lookupTag()
 ├── encoder.h/.cpp    — Rotary encoder (ISR quadrature, button state machine, volume/brightness/sleep save/load)
-├── gui.h/.cpp        — Management mode (menu, volume, brightness, sleep timer, web server screens)
+├── gui.h/.cpp        — Management mode (menu, volume, brightness, power saving, sleep timer, web server screens)
 ├── web.h/.cpp        — WiFi AP, REST API, file upload, SPA HTML page
 └── main.cpp          — Peripherals (bus, gfx, nfc), setup(), loop(), sleep/wake logic
 platformio.ini        — PlatformIO project config + library dependencies
@@ -88,12 +88,12 @@ WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, d
 5. `nfc.SAMConfig()`, draw waiting screen
 6. `initEncoder()` — loads saved volume from `/volume.cfg`, attaches ISR interrupts for quadrature decoding
 7. `loadBrightness()` + `applyBrightness()` — load saved brightness, apply via LEDC PWM
-8. `loadSleepTimer()` + `resetActivityTimer()` — load sleep timeout, init activity tracking
+8. `loadPowerSave()` + `loadSleepTimer()` + `resetActivityTimer()` — load power save and audio sleep timeouts, init activity tracking
 
 **loop() state machine:**
 - Sleep check: if idle on waiting screen > timeout, enter sleep (display off, backlight off)
 - Sleep state: poll encoder + NFC for wake; on wake restore display and re-sync
-- Management mode active (`guiActive()`) → delegate to `guiLoop()` (menu, volume, brightness, sleep timer, web server)
+- Management mode active (`guiActive()`) → delegate to `guiLoop()` (menu, volume, brightness, power saving, sleep timer, web server)
 - Jukebox mode: read encoder for volume (rotation shows overlay, auto-saves after 5s idle) or enter menu (hold)
 - `!tagPresent && found` → tag arrived: lookup UID → draw now-playing → `playWav()` → draw waiting
 - `tagPresent && !found` → tag removed: stop playback → draw waiting
@@ -120,7 +120,8 @@ WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, d
 ├── tags.json           # UID → file + metadata mapping (managed by web UI)
 ├── volume.cfg          # Persisted volume level 0–100 (plain text)
 ├── brightness.cfg      # Persisted brightness level 0–100 (plain text)
-└── sleeptimer.cfg      # Persisted sleep timeout in minutes (0=off, plain text)
+├── powersave.cfg        # Persisted power save timeout in minutes (0=off, plain text)
+└── sleeptimer.cfg      # Persisted audio sleep timer in minutes (0=off, plain text)
 ```
 
 `tags.json` format (only `file` is required):
@@ -165,5 +166,5 @@ Board: `lolin_d32_pro`, framework: `arduino`, CPU: 240 MHz.
 - **Heap is tight:** BMP loader allocates `240×240×2` bytes (115 KB), `playWav()` allocates a 2 KB DMA buffer. Avoid additional large heap allocations; prefer stack or static buffers where possible.
 
 ## Other important remarks
-- **Display artifacts on encoder adjustments** — in incremental update functions (updateVolumeDisplay, updateBrightnessDisplay, updateSleepTimerDisplay), always clear the full text area before drawing the new value. Arduino_GFX `setCursor` positions the top-left of the character cell (NOT the baseline), so text at y=140 with size=3 occupies y=140..163 (24 px). The `fillRect` eraser must span from a few px above the text's y to a few px below y + 8*size. Use generous margins: for size=3 at y, clear from y-8 to y+30.
+- **Display artifacts on encoder adjustments** — in incremental update functions (updateVolumeDisplay, updateBrightnessDisplay, updatePowerSaveDisplay, updateSleepTimerDisplay), always clear the full text area before drawing the new value. Arduino_GFX `setCursor` positions the top-left of the character cell (NOT the baseline), so text at y=140 with size=3 occupies y=140..163 (24 px). The `fillRect` eraser must span from a few px above the text's y to a few px below y + 8*size. Use generous margins: for size=3 at y, clear from y-8 to y+30.
 - **visual feedback** is important: every interaction (rotating, clicking encoder, insert/remove tag) must have visual feedback.

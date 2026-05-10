@@ -11,7 +11,9 @@ enum class Screen {
   MENU,
   VOLUME,
   BRIGHTNESS,
+  POWERSAVING,
   SLEEPTIMER,
+  VERSION,
   WEB,
 };
 
@@ -35,8 +37,14 @@ static void redraw() {
     case Screen::BRIGHTNESS:
       drawBrightnessScreen(brightnessLevel);
       break;
+    case Screen::POWERSAVING:
+      drawPowerSaveScreen(powerSaveMinutes);
+      break;
     case Screen::SLEEPTIMER:
       drawSleepTimerScreen(sleepTimerMinutes);
+      break;
+    case Screen::VERSION:
+      drawVersionScreen();
       break;
     case Screen::WEB:
       drawWebServerScreen(getWebConnectionCount());
@@ -91,9 +99,16 @@ void guiLoop() {
         saveBrightness();
         scr = Screen::MENU; menuSel = 2;
         break;
+      case Screen::POWERSAVING:
+        savePowerSave();
+        scr = Screen::MENU; menuSel = 3;
+        break;
       case Screen::SLEEPTIMER:
         saveSleepTimer();
-        scr = Screen::MENU; menuSel = 3;
+        scr = Screen::MENU; menuSel = 4;
+        break;
+      case Screen::VERSION:
+        scr = Screen::MENU; menuSel = 5;
         break;
       case Screen::WEB:
         stopWebServer();
@@ -123,7 +138,9 @@ void guiLoop() {
           case 0: initWebServer(); webRunning = true; scr = Screen::WEB; break;
           case 1: scr = Screen::VOLUME; break;
           case 2: scr = Screen::BRIGHTNESS; break;
-          case 3: scr = Screen::SLEEPTIMER; break;
+          case 3: scr = Screen::POWERSAVING; break;
+          case 4: scr = Screen::SLEEPTIMER; break;
+          case 5: scr = Screen::VERSION; break;
         }
         redraw();
       }
@@ -195,6 +212,42 @@ void guiLoop() {
       break;
     }
 
+    // ================ POWERSAVING ================
+    case Screen::POWERSAVING: {
+      int oldMinutes = powerSaveMinutes;
+
+      for (;;) {
+        if (ev > 0 && ev < ENC_CLICK) {
+          int idx = powerSaveToIndex(powerSaveMinutes) + ev;
+          while (idx < 0) idx += POWERSAVE_OPTIONS;
+          while (idx >= POWERSAVE_OPTIONS) idx -= POWERSAVE_OPTIONS;
+          powerSaveMinutes = powerSaveToMinutes(idx);
+        } else if (ev < 0) {
+          int idx = powerSaveToIndex(powerSaveMinutes) + ev;
+          while (idx < 0) idx += POWERSAVE_OPTIONS;
+          while (idx >= POWERSAVE_OPTIONS) idx -= POWERSAVE_OPTIONS;
+          powerSaveMinutes = powerSaveToMinutes(idx);
+        } else if (ev == ENC_CLICK) {
+          savePowerSave();
+          scr = Screen::MENU; menuSel = 3;
+          redraw();
+          break;
+        }
+        else if (ev == ENC_HOLD) {
+          savePowerSave();
+          scr = Screen::MENU; menuSel = 3;
+          redraw();
+          break;
+        }
+        ev = readEncoder();
+        if (ev == ENC_NONE) break;
+      }
+
+      if (powerSaveMinutes != oldMinutes)
+        updatePowerSaveDisplay(powerSaveMinutes);
+      break;
+    }
+
     // ================ SLEEPTIMER ================
     case Screen::SLEEPTIMER: {
       int oldMinutes = sleepTimerMinutes;
@@ -202,23 +255,23 @@ void guiLoop() {
       for (;;) {
         if (ev > 0 && ev < ENC_CLICK) {
           int idx = sleepTimerToIndex(sleepTimerMinutes) + ev;
-          while (idx < 0) idx += 5;
-          while (idx >= 5) idx -= 5;
+          while (idx < 0) idx += SLEEP_OPTIONS;
+          while (idx >= SLEEP_OPTIONS) idx -= SLEEP_OPTIONS;
           sleepTimerMinutes = sleepTimerToMinutes(idx);
         } else if (ev < 0) {
           int idx = sleepTimerToIndex(sleepTimerMinutes) + ev;
-          while (idx < 0) idx += 5;
-          while (idx >= 5) idx -= 5;
+          while (idx < 0) idx += SLEEP_OPTIONS;
+          while (idx >= SLEEP_OPTIONS) idx -= SLEEP_OPTIONS;
           sleepTimerMinutes = sleepTimerToMinutes(idx);
         } else if (ev == ENC_CLICK) {
           saveSleepTimer();
-          scr = Screen::MENU; menuSel = 3;
+          scr = Screen::MENU; menuSel = 4;
           redraw();
           break;
         }
         else if (ev == ENC_HOLD) {
           saveSleepTimer();
-          scr = Screen::MENU; menuSel = 3;
+          scr = Screen::MENU; menuSel = 4;
           redraw();
           break;
         }
@@ -230,6 +283,14 @@ void guiLoop() {
         updateSleepTimerDisplay(sleepTimerMinutes);
       break;
     }
+
+    // ================ VERSION ================
+    case Screen::VERSION:
+      if (ev == ENC_CLICK) {
+        scr = Screen::MENU; menuSel = 5;
+        redraw();
+      }
+      break;
 
     // ================ WEB (encoder only used for HOLD/CLICK — HTTP serviced above) ================
     case Screen::WEB:
