@@ -81,7 +81,7 @@ The KY-040 module has built-in 10k pull-up resistors. GPIO 34 and 36 are input-o
 - **Click (short press)** — save volume (jukebox) or select/confirm (menu)
 - **Hold (long press, >600ms)** — enter management menu (jukebox) or go back (menu)
 
-The menu provides access to **Web Server**, **Volume**, **Brightness**, **Power Saving**, and **Sleep Timer** settings. Brightness uses a white bar (same layout as volume) and is persisted to `/brightness.cfg`. Power Saving turns off the display after a configurable idle period (Off / 1 / 5 / 15 / 30 / 60 minutes) and is persisted to `/powersave.cfg`. Sleep Timer stops audio playback after the configured duration (Off / 1 / 15 / 30 / 60 / 120 minutes) and is persisted to `/sleeptimer.cfg`.
+The menu provides access to **Web Server**, **Volume**, **Brightness**, **Power Saving**, **Sleep Timer**, and **Version** (firmware version + build mode). Brightness uses a white bar (same layout as volume) and is persisted to `/brightness.cfg`. Power Saving turns off the display after a configurable idle period (Off / 5 / 15 / 30 / 60 minutes; the 1-minute option only appears in `DEV_MODE` builds) and is persisted to `/powersave.cfg`. Sleep Timer stops audio playback after the configured duration (Off / 15 / 30 / 60 / 120 minutes; the 1-minute option only appears in `DEV_MODE` builds) and is persisted to `/sleeptimer.cfg`.
 
 MAX98357A configuration pins:
 - **GAIN** — tie to GND for 12 dB and control volume in software. Leaving the pin floating is unreliable (high-impedance input, noise can produce random gain at power-up).
@@ -93,11 +93,14 @@ Each NFC tag UID maps to a single audio file on the SD card. When a tag is scann
 
 1. Any current playback stops immediately
 2. The file mapped to the scanned UID begins playback from the start
-3. Playback continues until the file ends or the tag is removed
-4. Rotate the encoder to adjust volume (overlay bar appears, auto-saves after 5 seconds of inactivity)
-5. When idle on the waiting screen, the display turns off after the configured sleep timeout (default 15 min). Twist the encoder or scan a tag to wake.
+3. The track loops as long as the same tag stays on the reader
+4. Replacing the tag with a different known tag during playback switches to the new track (hot-swap)
+5. Removing the tag stops playback
+6. Rotate the encoder to adjust volume (overlay bar appears, auto-saves after 5 seconds of inactivity)
+7. When idle on the waiting screen, the display turns off after the configured Power Saving timeout (default 15 min). Twist the encoder or scan a tag to wake.
+8. If a Sleep Timer is configured, an on-screen countdown is shown during playback and audio stops when the timer reaches zero (the tag must be removed/replaced before a new track will play).
 
-Unknown tags are displayed on screen for 10 seconds with their UID — click or hold the encoder to dismiss. The tag must be removed before a new tag is accepted (hot-swapping is not supported).
+Unknown tags are displayed on screen for 10 seconds with their UID — click or hold the encoder to dismiss, or remove/replace the tag.
 
 ## Web server & tag management
 
@@ -106,8 +109,9 @@ Hold the encoder button (>600ms) to enter the management menu, then select "Web 
 The web interface provides:
 - **Tag grid** — browse all registered tags with album art, title, and artist
 - **Add / Edit / Remove tags** — link any NFC tag UID to a WAV file on the SD card with optional metadata
-- **File upload** — upload WAV files directly to the SD card over WiFi
-- **Album art** — images in `/img/` are available for tag assignment
+- **WAV upload** — upload WAV files directly to `/music/` over WiFi (`POST /upload`)
+- **Image upload** — upload BMP/JPG/PNG album art to `/img/` (`POST /upload-img`)
+- **Album art picker** — choose any image in `/img/` when editing a tag (served via `GET /img?name=...`)
 
 Changes are written to `/tags.json` on the SD card immediately.
 
@@ -173,7 +177,7 @@ All fields except `file` are optional. `img` paths are relative to `/img/` on th
 
 ## Status
 
-Milestone 2 complete — web-based tag management, runtime volume control, and encoder-driven GUI are all functional.
+Milestone 3 in progress. Implemented: web-based tag management, WAV + image upload, runtime volume control, encoder-driven GUI with Brightness / Power Saving / Sleep Timer / Version screens, BMP album art (240×240, scaled in PSRAM), tag hot-swap detection, and amp-touch-noise mitigation via I2S priming.
 
 ## TODO
 

@@ -4,7 +4,7 @@
 
 RFID-driven audio player. Scan an NFC tag → lookup UID in `tags.json` on SD card → play the mapped WAV file through a MAX98357A I²S amplifier. Built on a Lolin D32 Pro (ESP32) with Arduino framework on PlatformIO. Display: ST7789V 240×320.
 
-**Status:** Milestone 2 complete — web-based tag management, runtime volume control, encoder-driven GUI all functional.
+**Status:** Milestone 3 in progress — tag hot-swap detection, brightness / power-save / sleep-timer settings persisted to SD, BMP album art (240×240, scaled in PSRAM), version screen, image upload, and amp-touch-noise mitigation via I2S priming.
 
 ## Pin map
 
@@ -48,15 +48,15 @@ src/
 ├── audio.h/.cpp      — WavHeader, WavMeta, playWav(), stopPlayback(), parseWavMeta()
 ├── screen.h/.cpp     — TFT draw functions for 240×320 (extern gfx, uses C_ color constants)
 ├── tags.h/.cpp       — tagDoc (JsonDocument), uid formatting, lookupTag()
-├── encoder.h/.cpp    — Rotary encoder (ISR quadrature, button state machine, volume/brightness/sleep save/load)
-├── gui.h/.cpp        — Management mode (menu, volume, brightness, power saving, sleep timer, web server screens)
+├── encoder.h/.cpp    — Rotary encoder (ISR quadrature, button state machine, volume/brightness/power-save/sleep-timer save/load)
+├── gui.h/.cpp        — Management mode (menu, volume, brightness, power saving, sleep timer, version, web server screens)
 ├── web.h/.cpp        — WiFi AP, REST API, file upload, SPA HTML page
 └── main.cpp          — Peripherals (bus, gfx, nfc), setup(), loop(), sleep/wake logic
 platformio.ini        — PlatformIO project config + library dependencies
 README.md             — User-facing docs (wiring, build steps, SD layout)
 ```
 
-`playWav()` accepts a `PN532 &nfc` reference parameter so audio.cpp doesn't depend on a global NFC object. `stopRequested` and `audioPlaying` are global flags in audio.cpp. `handleWebClient()` is called during playback to service HTTP requests.
+`playWav(filepath, nfc, tagUid, tagUidLen)` takes the active tag's UID so the per-150ms NFC poll can distinguish "tag absent" (3 misses → stop) from "tag swapped" (different UID → stop). Globals in audio.cpp: `audioPlaying`, `stopRequested`, `sleepTimerFired`, `audioStartTime`. `handleWebClient()` is not called during playback; the web server only runs while the GUI is on the WEB screen.
 
 ## Libraries (platformio.ini)
 
@@ -73,7 +73,7 @@ WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, d
 ## Encoder events
 
 `readEncoder()` returns:
-- `0` — no event
+- `0` (`ENC_NONE`) — no event
 - `±N` — N full detents clockwise (positive) or counter-clockwise (negative)
 - `100` (`ENC_CLICK`) — short press (<600ms release)
 - `101` (`ENC_HOLD`) — long press (>600ms, fires on hold, not on release)
@@ -81,31 +81,34 @@ WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, d
 ## main.cpp architecture
 
 **setup() flow:**
-1. TFT init (`gfx.begin()` — initializes VSPI via bare-metal SPI)
+1. LEDC attach + backlight off, then TFT init (`gfx.begin()` — initializes VSPI via bare-metal SPI). Backlight is held at 0 during boot draw to suppress power-on noise.
 2. SD mount (`SD.begin(4)`, reads `/tags.json` into `JsonDocument tagDoc`)
-3. Boot screen on TFT (SD error or waiting screen)
-4. PN532 init with firmware version check + raw-byte diagnostic on failure
-5. `nfc.SAMConfig()`, draw waiting screen
-6. `initEncoder()` — loads saved volume from `/volume.cfg`, attaches ISR interrupts for quadrature decoding
-7. `loadBrightness()` + `applyBrightness()` — load saved brightness, apply via LEDC PWM
-8. `loadPowerSave()` + `loadSleepTimer()` + `resetActivityTimer()` — load power save and audio sleep timeouts, init activity tracking
+3. Boot screen on TFT (SD error or waiting screen), then turn backlight on (`ledcWrite(TFT_BL, 255)`).
+4. `i2sPrime()` — install I2S driver with a default config so BCLK/LRC/DOUT are actively driven; otherwise the MAX98357A picks up touch-coupled noise.
+5. PN532 init with firmware version check + raw-byte diagnostic on failure (currently `while(true) delay(1000)` on failure — known unrecoverable hang).
+6. `nfc.SAMConfig()`
+7. `initEncoder()` — loads saved volume from `/volume.cfg`, attaches ISR interrupts for quadrature decoding
+8. `loadBrightness()` + `applyBrightness()` — load saved brightness, apply via LEDC PWM
+9. `loadPowerSave()` + `loadSleepTimer()` + `resetActivityTimer()` — load power save and audio sleep timeouts, init activity tracking
 
 **loop() state machine:**
-- Sleep check: if idle on waiting screen > timeout, enter sleep (display off, backlight off)
-- Sleep state: poll encoder + NFC for wake; on wake restore display and re-sync
-- Management mode active (`guiActive()`) → delegate to `guiLoop()` (menu, volume, brightness, power saving, sleep timer, web server)
-- Jukebox mode: read encoder for volume (rotation shows overlay, auto-saves after 5s idle) or enter menu (hold)
-- `!tagPresent && found` → tag arrived: lookup UID → draw now-playing → `playWav()` → draw waiting
-- `tagPresent && !found` → tag removed: stop playback → draw waiting
-- Unknown tag: 10-second dismiss screen with click/hold to dismiss or tag removal
-- No tag while audio plays: NFC polling happens inside `playWav()` every ~150ms
+- Sleep check: if idle on waiting screen > `powerSaveMinutes`, enter sleep (display off, backlight off). When `sleepStopped` is set (sleep timer fired with tag still present), the tag is treated as absent for sleep purposes.
+- Sleep state: poll encoder + NFC for wake; on wake restore display and re-sync. NFC wake is suppressed while `sleepStopped` is true so the still-present tag doesn't immediately re-trigger.
+- Management mode active (`guiActive()`) → delegate to `guiLoop()` (menu, volume, brightness, power saving, sleep timer, version, web server). Menu items: **Web Server, Volume, Brightness, Power Saving, Sleep Timer, Version**.
+- Jukebox mode: read encoder; HOLD enters menu (saves volume first). Rotation/click during playback are handled inside `playWav()`, not in the main loop.
+- `!tagPresent && found && !sleepStopped` → tag arrived: lookup UID → enter `while (tagPresent)` replay loop: draw now-playing, optionally draw sleep-timer countdown, run `playWav()`, then quick NFC re-poll. Same UID = replay; different UID = exit (next iteration handles new arrival); no tag (single miss in this quick check) = exit.
+- Sleep timer firing during playback sets `sleepTimerFired` → `sleepStopped`, breaks out of the replay loop and blocks re-trigger until the tag is physically removed.
+- `!found && tagPresent` → tag removed: 3-miss debounce, then clear `tagPresent`/`sleepStopped`, stop playback, draw waiting.
+- Unknown tag: 10-second dismiss screen with click/hold to dismiss, or tag removal/swap to exit.
+- During playback: NFC polling happens inside `playWav()` every ~150ms; a different UID stops the current track for tag-swap handling.
 
 **playWav() flow:**
-1. Open WAV file via `SD.open()`, parse header (RIFF/fmt/data chunks)
-2. Configure I2S to match file's sample rate / bits / channels
-3. Stream PCM in 2KB chunks: `f.read()` → volume-scale 16-bit samples → `i2s_write()`
-4. Per-chunk: service web client, check encoder for volume changes (draw overlay), poll NFC for tag removal every ~150ms (3 consecutive misses → stop)
-5. Teardown I2S on exit
+1. Open WAV file via `SD.open()`, parse header (RIFF/fmt/data chunks; `data` chunk must lie within first 4 KB of file)
+2. Configure I2S to match file's sample rate / bits / channels (16-bit and 24-bit nominally supported; **24-bit volume scaling and 24→32-bit unpacking are not implemented** — 24-bit playback is currently broken)
+3. Stream PCM in 2 KB chunks: `f.read()` → volume-scale 16-bit samples (float) → mono-to-stereo duplication → `i2s_write()`. `remaining` is decremented by `bytesWritten` (mono-adjusted) so partial DMA writes don't drop data.
+4. Per-chunk: check encoder for volume changes (draws bottom-overlay bar; auto-saves volume after 5s idle), update sleep-timer countdown each second, poll NFC every ~150ms (3 consecutive misses → stop; different UID → stop for tag swap)
+5. Sleep timer: when `sleepTimerMinutes > 0` and `audioStartTime + sleepTimerMinutes` has elapsed, persist `sleepTimerMinutes = 0`, set `sleepTimerFired`, and stop.
+6. Teardown I2S on exit (zero DMA, stop, uninstall driver — `i2sPrime()` will be needed again before next playback to keep amp pins driven; `i2sInit()` does this implicitly).
 
 **UID matching:** `uidToStr()` produces colon-separated hex (`04:A2:24:B2:C3:80:81`) to match keys in `tags.json`. `lookupTag()` uses ArduinoJson's `tagDoc[key].isNull()` check.
 
@@ -142,28 +145,32 @@ Paths may or may not start with `/` — `playWav()` prepends it if missing.
 ## Build & flash
 
 ```bash
-~/.platformio/penv/bin/pio run              # build
+~/.platformio/penv/bin/pio run              # build (env:release)
+~/.platformio/penv/bin/pio run -e debug     # build with -DDEV_MODE
 ~/.platformio/penv/bin/pio run -t upload    # flash
 ~/.platformio/penv/bin/pio device monitor   # serial (115200 baud)
 ```
 
-Board: `lolin_d32_pro`, framework: `arduino`, CPU: 240 MHz.
+Board: `lolin_d32_pro`, framework: `arduino`, CPU: 240 MHz, partitions: `huge_app.csv`, `BOARD_HAS_PSRAM` enabled (used by BMP loader). Two PIO environments: `release` (default) and `debug` (`-DDEV_MODE` exposes extra short-timeout options on Power Saving and Sleep Timer screens for testing).
 
 ## Dev workflow
+- create a new branch with appropriate name
+- make code changes.
 
-**After every code change:**
-1. **Verify it compiles** — run `~/.platformio/penv/bin/pio run` and fix any syntax or compile-time errors before considering the change complete. Never leave the project in a state that fails to build.
-2. **Cross-validate docs** — check CLAUDE.md and README.md against the actual source files. Update any stale descriptions — pin maps, source file trees, architecture flows, status, constraints, SD card layout, and TODO lists. These documents are the source of truth for future agents and contributors; drift between docs and code compounds over time.
+  **After every code change:**
+  1. **Verify it compiles** — run `~/.platformio/penv/bin/pio run` and fix any syntax or compile-time errors before considering the change complete. Never leave the project in a state that fails to build.
+  2. **Cross-validate docs** — check CLAUDE.md and README.md against the actual source files. Update any stale descriptions — pin maps, source file trees, architecture flows, status, constraints, SD card layout, and TODO lists. These documents are the source of truth for future agents and contributors; drift between docs and code compounds over time.
+
 
 ## Known constraints
 
 - **D32 Pro `SS` macro conflict:** `pins_arduino.h` defines `#define SS TF_CS` (→ `#define SS 4`). Libraries that use `SS` as a parameter name will fail to compile. Avoid libraries affected by this, or `#undef SS` before including them.
 - **TFT macros conflict:** D32 Pro variant pre-defines `TFT_CS=14`, `TFT_DC=27`, `TFT_RST=33`.
 - **I2S uses legacy driver:** The `driver/i2s.h` API is deprecated in ESP-IDF 5.x. It works but emits warnings. Migration to `i2s_std.h` is a future task.
-- **Single audio track at a time:** No crossfade or queue. Scanning a new tag stops the current track. Tag must be removed before a new tag is accepted.
+- **Single audio track at a time:** No crossfade or queue. Tag swaps mid-playback are detected (in both `playWav()` and the main loop) — a different UID stops the current track and the new tag is picked up on the next loop iteration. The same tag left on the reader replays the track in a `while (tagPresent)` loop.
 - **WAV only:** Standard PCM WAV (16/24-bit, mono/stereo, any sample rate). No MP3/FLAC support.
-- **Web server uses AP mode:** `WIFI_SSID` / `WIFI_PASSWORD` from config.h. Exposes REST API (`/api/tags`, `/api/files`, `/api/images`, `/upload`) and serves a single-page web app for tag management.
-- **Heap is tight:** BMP loader allocates `240×240×2` bytes (115 KB), `playWav()` allocates a 2 KB DMA buffer. Avoid additional large heap allocations; prefer stack or static buffers where possible.
+- **Web server uses AP mode:** `WIFI_SSID` / `WIFI_PASSWORD` from config.h. Exposes REST API: `/api/tags` (list), `/api/tag` (POST upsert / DELETE / OPTIONS), `/api/files`, `/api/images`, `/img?name=` (serve BMP), `/upload` (WAV multipart), `/upload-img` (image multipart). Serves a single-page web app at `/`. Web server only runs while the GUI is on the WEB screen — leaving the WEB screen calls `stopWebServer()`.
+- **Heap is tight:** BMP loader allocates a raw image buffer (PSRAM preferred via `heap_caps_malloc(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)`, DRAM fallback) plus a 240×240×2 = 115 KB scaled buffer in `drawNowPlayingScreen`. Source BMPs up to 600×600 24-bit are accepted; larger or non-24-bit BMPs are rejected. `playWav()` allocates a 2 KB chunk buffer. Avoid additional large heap allocations; prefer stack or static buffers where possible.
 
 ## Other important remarks
 - **Display artifacts on encoder adjustments** — in incremental update functions (updateVolumeDisplay, updateBrightnessDisplay, updatePowerSaveDisplay, updateSleepTimerDisplay), always clear the full text area before drawing the new value. Arduino_GFX `setCursor` positions the top-left of the character cell (NOT the baseline), so text at y=140 with size=3 occupies y=140..163 (24 px). The `fillRect` eraser must span from a few px above the text's y to a few px below y + 8*size. Use generous margins: for size=3 at y, clear from y-8 to y+30.
