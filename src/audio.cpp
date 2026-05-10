@@ -1,5 +1,4 @@
 #include "audio.h"
-#include "web.h"
 #include "screen.h"
 #include <driver/i2s.h>
 
@@ -194,8 +193,6 @@ void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t ta
     uint32_t consumed = mono16 ? (uint32_t)(bytesWritten / 2) : (uint32_t)bytesWritten;
     if (consumed > remaining) consumed = remaining;
     remaining -= consumed;
-
-    handleWebClient();
 
     // --- Encoder: volume adjustment during playback ---
     int enc = readEncoder();
