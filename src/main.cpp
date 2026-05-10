@@ -14,7 +14,9 @@
 #include "encoder.h"
 #include "gui.h"
 #include "web.h"
+#include "storage.h"
 #include "timer_logic.h"
+#include "jukebox_state.h"
 
 #include <PN532_HSU.h>
 #include <PN532.h>
@@ -29,74 +31,207 @@ Arduino_ESP32SPI bus(TFT_DC, TFT_CS, TFT_SCK, TFT_MOSI, TFT_MISO, VSPI);
 Arduino_ST7789  gfx(&bus, TFT_RST, 0, true, 240, 320, 0, 0, 0, 0);
 
 // --- State ---
-static bool     tagPresent      = false;
-static bool     sleepStopped    = false;  // set when sleep timer fires, cleared on tag removal
-static uint8_t  tagAbsentCount  = 0;      // debounce counter for tag removal detection
-static char     lastTagUid[32]  = "";
-static uint32_t s_lastActivity    = 0;  // millis() of last user interaction
+// All tag/sleep/powersave state lives in s_state (see jukebox_state.h).
+// The play loop owns its own local lastTagUid for swap detection.
+static JukeboxState s_state;
 
-// --- Sleep helpers (need gfx + nfc in scope) ---
-static void enterSleepMode() {
+// SD-card lifecycle flag — set by initSDAndLoadTags() below, read by any
+// module that gates on SD via storage.h.
+bool sdReady = false;
+
+// Mount the SD card and parse /tags.json into tagDoc. Sets sdReady; on
+// failure (no card, bad JSON) the device continues to boot — playback paths
+// gate on sdReady themselves.
+static void initSDAndLoadTags() {
+  Serial.print("Mounting SD... ");
+  if (!SD.begin(SD_CS)) {
+    sdReady = false;
+    Serial.println("FAILED");
+    return;
+  }
+  sdReady = true;
+  Serial.println("OK");
+
+  File f = SD.open("/tags.json", FILE_READ);
+  if (!f) {
+    Serial.println("tags.json not found.");
+    return;
+  }
+  DeserializationError err = deserializeJson(tagDoc, f);
+  f.close();
+  if (err) {
+    Serial.print("tags.json err: ");
+    Serial.println(err.c_str());
+    tagDoc.clear();
+    return;
+  }
+  Serial.print(tagDoc.size());
+  Serial.println(" tags loaded.");
+}
+
+// --- Sleep helpers (need gfx + nfc in scope; mode flip lives in the FSM) ---
+// PN532 didn't respond on UART. Show an on-screen error, then bypass the
+// library and poke the chip with a raw wake + GetFirmwareVersion frame so the
+// serial log captures whether ANY bytes come back (wiring/power vs dead chip).
+// Hangs the device — there is no recovery path.
+static void handlePN532NotFound() {
+  Serial.println("PN532 not found.");
+  if (sdReady) {
+    gfx.fillScreen(C_BG);
+    gfx.setTextColor(C_RED);  gfx.setTextSize(2);
+    gfx.setCursor(30, 40); gfx.print("PN532");
+    gfx.setTextSize(1);
+    gfx.setCursor(30, 65); gfx.print("NOT FOUND");
+  }
+  // PN532 HSU wake-up frame (0x55 0x55 + nulls to flush UART).
+  const uint8_t wake[] = {0x55, 0x55, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                          0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+  Serial2.write(wake, sizeof(wake));
+  // Raw GetFirmwareVersion command frame in PN532 wire format.
+  const uint8_t gfv[] = {0x00, 0x00, 0xFF, 0x02, 0xFE, 0xD4, 0x02, 0x2A, 0x00};
+  Serial2.write(gfv, sizeof(gfv));
+  Serial2.flush();
+  uint32_t t0 = millis();
+  Serial.print("RX: ");
+  while (millis() - t0 < 500)
+    while (Serial2.available()) {
+      uint8_t b = Serial2.read();
+      if (b < 0x10) Serial.print('0');
+      Serial.print(b, HEX); Serial.print(' ');
+    }
+  Serial.println();
+  while (true) delay(1000);
+}
+
+static void doEnterSleep() {
   gfx.displayOff();
   ledcWrite(TFT_BL, 0);
-  sleeping = true;
   Serial.println("Sleep mode entered.");
 }
 
-static void wakeFromSleep() {
+static void doWakeFromSleep() {
   gfx.displayOn();
   delay(5);
   applyBrightness();
   while (readEncoder() != ENC_NONE) {}  // drain accumulated encoder events
   nfc.SAMConfig();                       // re-sync PN532 after idle
-  sleeping = false;
-  resetActivityTimer();
   drawWaitingScreen();
   Serial.println("Woke from sleep.");
 }
 
 void resetActivityTimer() {
-  s_lastActivity = millis();
+  s_state.lastActivityMs = millis();
+}
+
+// Map raw encoder event integer to FSM-normalized EncEvent.
+static EncEvent normalizeEnc(int ev) {
+  if (ev == ENC_NONE)  return EncEvent::None;
+  if (ev == ENC_HOLD)  return EncEvent::Hold;
+  if (ev == ENC_CLICK) return EncEvent::Click;
+  return EncEvent::Rotated;  // ±N rotation steps
+}
+
+// --- TriggerPlayback action handler: drives the play loop / unknown-tag screen.
+//  Returns updates to s_state via direct mutation. After return, the next
+//  jukeboxStep() tick observes the new sleepStopped / tagPresent values.
+static void runPlayback(const uint8_t *uid, uint8_t uidLength) {
+  if (!sdReady) {
+    drawTagScreen(uid, uidLength);
+    return;
+  }
+
+  TagInfo tag = lookupTag(uid, uidLength);
+  if (!tag.file) {
+    Serial.println("Unknown tag.");
+    drawUnknownTagScreen(uid, uidLength);
+    char shownUid[32]; uidToStr(uid, uidLength, shownUid);
+    uint32_t t = millis();
+    while (millis() - t < 10000) {
+      int eu = readEncoder();
+      if (eu == ENC_CLICK || eu == ENC_HOLD) break;
+      uint8_t u[10]; uint8_t uLen = 0;
+      if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 200)) {
+        s_state.tagPresent = false;
+        Serial.println("Tag removed.");
+        drawWaitingScreen();
+        return;
+      }
+      if (uLen <= 10) {
+        char currentUid[32]; uidToStr(u, uLen, currentUid);
+        if (strcmp(currentUid, shownUid) != 0) {
+          s_state.tagPresent = false;  // swap — next FSM tick re-triggers
+          return;
+        }
+      }
+      delay(30);
+    }
+    drawWaitingScreen();
+    return;
+  }
+
+  // Known tag — loop playback while the same tag remains on the reader.
+  audioStartTime = millis();
+  char localTagUid[32]; uidToStr(uid, uidLength, localTagUid);
+  bool localPresent = true;
+
+  while (localPresent) {
+    Serial.print("Playing: "); Serial.println(tag.file);
+    drawNowPlayingScreen(tag);
+    if (sleepTimerMinutes > 0) {
+      uint32_t remaining = timerRemainingMs(sleepTimerMinutes, millis() - audioStartTime);
+      drawSleepTimerCountdown(remaining);
+    }
+    playWav(tag.file, nfc, uid, uidLength);
+
+    if (sleepTimerFired) {
+      // Sleep timer fired — tag is still on reader. The FSM next tick will
+      // observe sleepTimerJustFired and set s_state.sleepStopped = true.
+      // We keep s_state.tagPresent = true to require physical removal.
+      break;
+    }
+
+    // Quick NFC check: detect tag removal or tag swap before replay
+    uint8_t u[10]; uint8_t uLen = 0;
+    if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 50)) {
+      localPresent = false;
+      s_state.tagPresent = false;
+      s_state.lastActivityMs = millis();
+    } else if (uLen <= 10) {
+      char currentUid[32]; uidToStr(u, uLen, currentUid);
+      if (strcmp(currentUid, localTagUid) != 0) {
+        // Swap — next FSM tick will treat the new tag as a fresh arrival.
+        localPresent = false;
+        s_state.tagPresent = false;
+        s_state.lastActivityMs = millis();
+      }
+    }
+  }
+  drawWaitingScreen();
 }
 
 // ================================================================
 
 void setup() {
+  // 0. Force backlight off as the very first thing. Before this point
+  //    TFT_BL is a floating input that reads HIGH on the D32 Pro, which
+  //    briefly turns the backlight on and exposes the TFT's uninitialized
+  //    RAM (visible noise) during the Serial.begin + delay window below.
+  pinMode(TFT_BL, OUTPUT);
+  digitalWrite(TFT_BL, LOW);
+
   Serial.begin(115200);
   while (!Serial) delay(10);
   delay(200);
   Serial.println("\nESP Jukebox starting...");
 
-  // 1. Init TFT (start with backlight off to avoid power-on noise)
+  // 1. Init TFT (backlight already held off by the digitalWrite above; the
+  //    LEDC takeover preserves the LOW level).
   ledcAttach(TFT_BL, BRIGHTNESS_PWM_FREQ, BRIGHTNESS_PWM_RES);
   ledcWrite(TFT_BL, 0);
   gfx.begin();
 
-  // 2. Init SD
-  Serial.print("Mounting SD... ");
-  if (SD.begin(SD_CS)) {
-    sdReady = true;
-    Serial.println("OK");
-
-    File f = SD.open("/tags.json", FILE_READ);
-    if (f) {
-      DeserializationError err = deserializeJson(tagDoc, f);
-      f.close();
-      if (err) {
-        Serial.print("tags.json err: ");
-        Serial.println(err.c_str());
-        tagDoc.clear();
-      } else {
-        Serial.print(tagDoc.size());
-        Serial.println(" tags loaded.");
-      }
-    } else {
-      Serial.println("tags.json not found.");
-    }
-  } else {
-    sdReady = false;
-    Serial.println("FAILED");
-  }
+  // 2. Init SD + load tags.json
+  initSDAndLoadTags();
 
   // 3. Boot screen (drawn with backlight off to avoid power-on noise)
   if (!sdReady) {
@@ -115,39 +250,14 @@ void setup() {
   nfc.begin();
 
   uint32_t versiondata = nfc.getFirmwareVersion();
-  if (!versiondata) {
-    Serial.println("PN532 not found.");
-    if (sdReady) {
-      gfx.fillScreen(C_BG);
-      gfx.setTextColor(C_RED);  gfx.setTextSize(2);
-      gfx.setCursor(30, 40); gfx.print("PN532");
-      gfx.setTextSize(1);
-      gfx.setCursor(30, 65); gfx.print("NOT FOUND");
-    }
-    const uint8_t wake[] = {0x55, 0x55, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-    Serial2.write(wake, sizeof(wake));
-    const uint8_t gfv[] = {0x00, 0x00, 0xFF, 0x02, 0xFE, 0xD4, 0x02, 0x2A, 0x00};
-    Serial2.write(gfv, sizeof(gfv));
-    Serial2.flush();
-    uint32_t t0 = millis();
-    Serial.print("RX: ");
-    while (millis() - t0 < 500)
-      while (Serial2.available()) {
-        uint8_t b = Serial2.read();
-        if (b < 0x10) Serial.print('0');
-        Serial.print(b, HEX); Serial.print(' ');
-      }
-    Serial.println();
-    while (true) delay(1000);
-  }
+
+  if (!versiondata) handlePN532NotFound();  // does not return
 
   Serial.printf("Found PN532 fw %d.%d\n",
                 (versiondata >> 16) & 0xFF,
                 (versiondata >> 8) & 0xFF);
 
   nfc.SAMConfig();
-  Serial.println("Ready.");
 
   // 5. Init encoder (loads saved volume, sets up interrupts)
   initEncoder();
@@ -156,157 +266,77 @@ void setup() {
   loadBrightness();
   applyBrightness();
 
-  // 7. Load power save & sleep timer, initialize activity timer
+  // 7. Load power save & sleep timer, initialize FSM
   loadPowerSave();
   loadSleepTimer();
-  resetActivityTimer();
+  s_state = jukeboxInitialState(millis());
+
+  Serial.println("Jukebox Ready.");
 }
 
 // ================================================================
 
 void loop() {
-  // --- Sleep entry check (jukebox mode, idle, no tag, no audio) ---
-  // sleepStopped: tag is physically present but playback was stopped by timer — treat as absent
-  if (!sleeping && !guiActive() && !audioPlaying && (!tagPresent || sleepStopped)) {
-    if (powerSaveShouldSleep(powerSaveMinutes, millis() - s_lastActivity)) {
-      enterSleepMode();
-    }
-  }
-
-  // --- Sleep state: poll for wake events only ---
-  if (sleeping) {
-    int ev = readEncoder();
-    if (ev != ENC_NONE) {
-      wakeFromSleep();
-      return;
-    }
-    // Don't wake on NFC if sleep timer stopped playback — tag is still present
-    if (!sleepStopped) {
-      uint8_t u[10]; uint8_t uLen = 0;
-      if (nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 100)) {
-        wakeFromSleep();
-        return;
-      }
-    }
-    delay(50);
-    return;
-  }
-
-  // --- Management mode ---
+  // Menu is handled externally — short-circuit the FSM while guiActive.
   if (guiActive()) {
     guiLoop();
     return;
   }
 
-  // --- Jukebox mode: handle encoder (menu entry only; volume in playback) ---
-  int ev = readEncoder();
+  // ---- Gather inputs for this tick ----
+  TickInput in = {};
+  in.nowMs             = millis();
+  in.encoderEvent      = normalizeEnc(readEncoder());
+  in.audioPlaying      = audioPlaying;
+  in.sleepTimerJustFired = sleepTimerFired;
+  if (sleepTimerFired) sleepTimerFired = false;  // consume edge
+  in.powerSaveMinutes  = powerSaveMinutes;
 
-  if (ev != ENC_NONE) resetActivityTimer();
-
-  if (ev == ENC_HOLD) {
-    saveVolume();
-    guiEnter();
-    return;
-  }
-
-  // --- NFC tag polling ---
+  // Don't waste an NFC poll while sleeping with a tag still on the reader.
   uint8_t uid[10] = {0};
   uint8_t uidLength = 0;
-  bool found = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, 300);
-  if (uidLength > 10) uidLength = 10;
-
-  if (found && !tagPresent && !sleepStopped) {
-    resetActivityTimer();
-    tagPresent = true;
-    tagAbsentCount = 0;
-    uidToStr(uid, uidLength, lastTagUid);
-    Serial.print("Tag UID("); Serial.print(uidLength); Serial.print("): ");
-    printHex(uid, uidLength); Serial.println();
-
-    if (sdReady) {
-      TagInfo tag = lookupTag(uid, uidLength);
-      if (tag.file) {
-        // Loop playback while the same tag remains on the reader
-        audioStartTime = millis();
-        while (tagPresent) {
-          Serial.print("Playing: "); Serial.println(tag.file);
-          drawNowPlayingScreen(tag);
-          if (sleepTimerMinutes > 0) {
-            uint32_t remaining = timerRemainingMs(sleepTimerMinutes, millis() - audioStartTime);
-            drawSleepTimerCountdown(remaining);
-          }
-          playWav(tag.file, nfc, uid, uidLength);
-          // Sleep timer fired — require tag removal before re-trigger
-          if (sleepTimerFired) {
-            sleepTimerFired = false;
-            sleepStopped = true;
-            resetActivityTimer();
-            break;
-          }
-          // Quick NFC check: detect tag removal or tag swap before replay
-          uint8_t u[10]; uint8_t uLen = 0;
-          if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 50)) {
-            tagPresent = false;
-            lastTagUid[0] = '\0';
-            resetActivityTimer();
-          } else if (uLen <= 10) {
-            char currentUid[32];
-            uidToStr(u, uLen, currentUid);
-            if (strcmp(currentUid, lastTagUid) != 0) {
-              tagPresent = false;  // different tag → arrival on next loop
-              resetActivityTimer();
-            }
-          }
-        }
-        drawWaitingScreen();
-      } else {
-        Serial.println("Unknown tag.");
-        drawUnknownTagScreen(uid, uidLength);
-        uidToStr(uid, uidLength, lastTagUid);
-        uint32_t t = millis();
-        while (millis() - t < 10000) { // 10s timeout
-          int eu = readEncoder();
-          if (eu == ENC_CLICK || eu == ENC_HOLD) {
-            break; // dismiss
-          }
-          // Check for tag removal or swap
-          uint8_t u[10]; uint8_t uLen = 0;
-          if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 200)) {
-            tagPresent = false;
-            lastTagUid[0] = '\0';
-            Serial.println("Tag removed.");
-            drawWaitingScreen();
-            break;
-          }
-          if (uLen <= 10) {
-            char currentUid[32];
-            uidToStr(u, uLen, currentUid);
-            if (strcmp(currentUid, lastTagUid) != 0) {
-              tagPresent = false;  // different tag → arrival on next loop
-              break;
-            }
-          }
-          delay(30);
-        }
-        if (tagPresent) drawWaitingScreen();
-      }
-    } else {
-      drawTagScreen(uid, uidLength);
-    }
-  } else if (!found && tagPresent) {
-    // Debounce: require 3 consecutive misses before accepting removal.
-    // This prevents NFC glitches from resetting sleepStopped and re-triggering playback.
-    if (++tagAbsentCount >= 3) {
-      resetActivityTimer();
-      tagPresent = false;
-      sleepStopped = false;
-      tagAbsentCount = 0;
-      lastTagUid[0] = '\0';
-      Serial.println("Tag removed.");
-      if (audioPlaying) stopPlayback();
-      drawWaitingScreen();
-    }
-  } else if (found && tagPresent) {
-    tagAbsentCount = 0;
+  if (!(s_state.mode == Mode::Sleeping && s_state.sleepStopped)) {
+    uint16_t timeout = (s_state.mode == Mode::Sleeping) ? 100 : 300;
+    in.nfcFound = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, timeout);
+    if (uidLength > 10) uidLength = 10;
   }
+
+  // ---- Run the state machine ----
+  TickResult r = jukeboxStep(s_state, in);
+  s_state = r.state;
+
+  // ---- Dispatch actions ----
+  for (uint8_t i = 0; i < r.actions.count; i++) {
+    switch (r.actions.items[i]) {
+      case Action::EnterSleep:
+        doEnterSleep();
+        break;
+
+      case Action::WakeFromSleep:
+        doWakeFromSleep();
+        break;
+
+      case Action::EnterMenu:
+        saveVolume();
+        guiEnter();
+        return;  // gui takes over next tick
+
+      case Action::TriggerPlayback:
+        Serial.print("Tag UID("); Serial.print(uidLength); Serial.print("): ");
+        printHex(uid, uidLength); Serial.println();
+        runPlayback(uid, uidLength);
+        break;
+
+      case Action::ConfirmTagRemoved:
+        Serial.println("Tag removed.");
+        if (audioPlaying) stopPlayback();
+        drawWaitingScreen();
+        break;
+
+      case Action::None:
+        break;
+    }
+  }
+
+  if (s_state.mode == Mode::Sleeping) delay(50);
 }

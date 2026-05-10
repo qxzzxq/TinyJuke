@@ -1,14 +1,13 @@
 #include "encoder.h"
 #include "encoder_gray.h"
 #include "value_array.h"
-#include "tags.h"
+#include "storage.h"
 #include <SD.h>
 
 int volumeLevel      = VOLUME_DEFAULT;
 int brightnessLevel  = BRIGHTNESS_DEFAULT;
 int powerSaveMinutes = POWERSAVE_DEFAULT;
 int sleepTimerMinutes = SLEEPTIMER_DEFAULT;
-bool sleeping        = false;
 
 // --- Gray-code state machine ---
 // Tracks the full 2-bit quadrature state. Only valid gray-code transitions

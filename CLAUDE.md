@@ -55,6 +55,7 @@ src/
 ├── encoder_gray.h    — Pure gray-code transition helper used by the encoder ISR (testable on native)
 ├── value_array.h     — Pure helpers for "fixed list of option values" lookups (power-save/sleep-timer)
 ├── timer_logic.h     — Pure timer policy: sleepTimerShouldFire / powerSaveShouldSleep / timerRemainingMs / formatCountdownMMSS
+├── jukebox_state.h/.cpp — Pure top-level FSM (Waiting / Sleeping + sleepStopped / tagPresent flags) driving loop()'s decisions
 ├── gui.h/.cpp        — Management mode (menu, volume, brightness, power saving, sleep timer, version, web server screens)
 ├── web.h/.cpp        — WiFi AP, REST API, file upload, SPA HTML page
 └── main.cpp          — Peripherals (bus, gfx, nfc), setup(), loop(), sleep/wake logic
@@ -165,7 +166,11 @@ Board: `lolin_d32_pro`, framework: `arduino`, CPU: 240 MHz, partitions: `huge_ap
 
 Pure logic (anything not coupled to SD/I2S/Serial/PN532) is covered by Unity tests in `test/test_pure/test_main.cpp`. The test program `#include`s the pure source files directly (`wav_parser.cpp`, `tag_utils.cpp`, `encoder_gray.h`, `value_array.h`) so the native env doesn't need Arduino stubs. When adding a new pure helper, prefer putting it in a header or pure-only `.cpp` so it stays testable.
 
-What's covered: `uidToStr`, `lookupTag`, `parseWavHeaderBuffer`, `parseWavMetaBuffer`, `grayStep`, `valueToIndex`, `indexToValue`, `sleepTimerShouldFire`, `powerSaveShouldSleep`, `timerRemainingMs`, `formatCountdownMMSS`. What's NOT covered (and needs on-target verification): the I2S setup, the SD-backed `playWav` streaming loop, the encoder ISR + button debounce state machine, the GUI, the web server.
+What's covered: `uidToStr`, `lookupTag`, `parseWavHeaderBuffer`, `parseWavMetaBuffer`, `grayStep`, `valueToIndex`, `indexToValue`, `sleepTimerShouldFire`, `powerSaveShouldSleep`, `timerRemainingMs`, `formatCountdownMMSS`, and the **top-level tag/sleep/powersave FSM** (`jukeboxStep`). The FSM tests cover tag arrival, removal debounce, sleep-timer-fired suppression, power-save entry, NFC-suppressed-wake, and a full sleep-timer recovery scenario end-to-end. What's NOT covered (and needs on-target verification): the I2S setup, the SD-backed `playWav` streaming loop, the encoder ISR + button debounce state machine, the management GUI, the web server.
+
+### State machine architecture
+
+`main.cpp` `loop()` is a thin dispatcher: read inputs (encoder, NFC, audio flags) → call `jukeboxStep(state, input)` → execute the returned `Action`s (EnterSleep / WakeFromSleep / EnterMenu / TriggerPlayback / ConfirmTagRemoved). All decisions about *when* to sleep, *when* to trigger playback, and *when* to debounce a tag removal live in `jukebox_state.cpp`. The `TriggerPlayback` action invokes the (still-blocking) play loop, which mutates `s_state.tagPresent` / `s_state.lastActivityMs` directly when it exits so the next tick observes the new state. The GUI is handled externally — main.cpp short-circuits to `guiLoop()` while `guiActive()`.
 
 ## Dev workflow
 - create a new branch with appropriate name

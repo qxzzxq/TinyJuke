@@ -18,7 +18,6 @@ extern int volumeLevel;
 extern int brightnessLevel;
 extern int powerSaveMinutes;
 extern int sleepTimerMinutes;
-extern bool sleeping;
 
 void initEncoder();
 int  readEncoder();      // returns ENC_* event, clears after read

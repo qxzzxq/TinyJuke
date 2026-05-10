@@ -1,0 +1,6 @@
+#pragma once
+
+// Runtime SD-card lifecycle flag. Set by initSDAndLoadTags() in main.cpp;
+// read by any module that needs to gate SD operations (encoder settings
+// load/save, boot-screen branch, etc.). Defined in main.cpp.
+extern bool sdReady;

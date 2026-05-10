@@ -15,6 +15,7 @@
 #include "encoder_gray.h"
 #include "value_array.h"
 #include "timer_logic.h"
+#include "jukebox_state.cpp"
 
 // ----------------------------------------------------------------
 //  uidToStr — colon-separated uppercase hex
@@ -449,6 +450,353 @@ void test_format_countdown_two_hour_max() {
 }
 
 // ----------------------------------------------------------------
+//  Jukebox FSM — top-level state machine
+// ----------------------------------------------------------------
+
+// Helpers for tersely building inputs and asserting on outputs.
+static TickInput baseInput(uint32_t nowMs) {
+  TickInput in = {};
+  in.nowMs = nowMs;
+  in.encoderEvent = EncEvent::None;
+  in.nfcFound = false;
+  in.audioPlaying = false;
+  in.sleepTimerJustFired = false;
+  in.powerSaveMinutes = 5;
+  return in;
+}
+
+static bool hasAction(const ActionList &al, Action a) {
+  for (uint8_t i = 0; i < al.count; i++)
+    if (al.items[i] == a) return true;
+  return false;
+}
+
+void test_fsm_initial_state_is_waiting_idle() {
+  JukeboxState s = jukeboxInitialState(0);
+  TEST_ASSERT_EQUAL(Mode::Waiting, (int)s.mode);
+  TEST_ASSERT_FALSE(s.tagPresent);
+  TEST_ASSERT_FALSE(s.sleepStopped);
+  TEST_ASSERT_EQUAL_UINT8(0, s.tagAbsentCount);
+}
+
+// --- Tag arrival / playback trigger ------------------------------
+
+void test_fsm_tag_arrival_triggers_playback() {
+  JukeboxState s = jukeboxInitialState(0);
+  TickInput in = baseInput(100);
+  in.nfcFound = true;
+  TickResult r = jukeboxStep(s, in);
+  TEST_ASSERT_TRUE(hasAction(r.actions, Action::TriggerPlayback));
+  TEST_ASSERT_TRUE(r.state.tagPresent);
+  TEST_ASSERT_EQUAL_UINT32(100, r.state.lastActivityMs);
+}
+
+void test_fsm_no_retrigger_while_tag_present() {
+  // After playback triggers, subsequent ticks with the tag still present
+  // must NOT emit another TriggerPlayback.
+  JukeboxState s = jukeboxInitialState(0);
+  s.tagPresent = true;
+  TickInput in = baseInput(200);
+  in.nfcFound = true;
+  TickResult r = jukeboxStep(s, in);
+  TEST_ASSERT_FALSE(hasAction(r.actions, Action::TriggerPlayback));
+  TEST_ASSERT_TRUE(r.state.tagPresent);
+}
+
+void test_fsm_arrival_suppressed_when_sleep_stopped() {
+  // sleepStopped=true means a tag was suppressed by the sleep timer. Even
+  // if (defensively) tagPresent is false here, an NFC find must not trigger.
+  JukeboxState s = jukeboxInitialState(0);
+  s.sleepStopped = true;
+  TickInput in = baseInput(200);
+  in.nfcFound = true;
+  TickResult r = jukeboxStep(s, in);
+  TEST_ASSERT_FALSE(hasAction(r.actions, Action::TriggerPlayback));
+}
+
+// --- Tag removal debounce ----------------------------------------
+
+void test_fsm_tag_removal_requires_three_misses() {
+  JukeboxState s = jukeboxInitialState(0);
+  s.tagPresent = true;
+  s.lastActivityMs = 0;
+
+  for (int miss = 1; miss <= 2; miss++) {
+    TickResult r = jukeboxStep(s, baseInput(miss * 100));
+    s = r.state;
+    TEST_ASSERT_FALSE(hasAction(r.actions, Action::ConfirmTagRemoved));
+    TEST_ASSERT_TRUE(s.tagPresent);
+    TEST_ASSERT_EQUAL_UINT8(miss, s.tagAbsentCount);
+  }
+  // Third consecutive miss confirms removal.
+  TickResult r3 = jukeboxStep(s, baseInput(300));
+  TEST_ASSERT_TRUE(hasAction(r3.actions, Action::ConfirmTagRemoved));
+  TEST_ASSERT_FALSE(r3.state.tagPresent);
+  TEST_ASSERT_FALSE(r3.state.sleepStopped);
+  TEST_ASSERT_EQUAL_UINT8(0, r3.state.tagAbsentCount);
+}
+
+void test_fsm_intermittent_glitch_does_not_remove_tag() {
+  // miss, miss, found, miss, miss — only resets to 1 after the found, never reaches 3.
+  JukeboxState s = jukeboxInitialState(0);
+  s.tagPresent = true;
+  TickResult r;
+  r = jukeboxStep(s, baseInput(10));                                s = r.state;
+  r = jukeboxStep(s, baseInput(20));                                s = r.state;
+  TickInput inFound = baseInput(30); inFound.nfcFound = true;
+  r = jukeboxStep(s, inFound);                                      s = r.state;
+  TEST_ASSERT_EQUAL_UINT8(0, s.tagAbsentCount);
+  r = jukeboxStep(s, baseInput(40));                                s = r.state;
+  r = jukeboxStep(s, baseInput(50));                                s = r.state;
+  TEST_ASSERT_FALSE(hasAction(r.actions, Action::ConfirmTagRemoved));
+  TEST_ASSERT_TRUE(s.tagPresent);
+}
+
+void test_fsm_removal_clears_sleep_stopped() {
+  // After sleep timer fired, tag removal should clear sleepStopped so the
+  // next arrival can trigger playback normally.
+  JukeboxState s = jukeboxInitialState(0);
+  s.tagPresent = true;
+  s.sleepStopped = true;
+  s.tagAbsentCount = 2;
+  TickResult r = jukeboxStep(s, baseInput(500));
+  TEST_ASSERT_TRUE(hasAction(r.actions, Action::ConfirmTagRemoved));
+  TEST_ASSERT_FALSE(r.state.sleepStopped);
+  TEST_ASSERT_FALSE(r.state.tagPresent);
+}
+
+// --- Sleep timer interaction --------------------------------------
+
+void test_fsm_sleep_timer_fired_sets_sleep_stopped() {
+  JukeboxState s = jukeboxInitialState(0);
+  s.tagPresent = true;  // tag was still on reader when timer fired
+  TickInput in = baseInput(1000);
+  in.sleepTimerJustFired = true;
+  in.nfcFound = true;  // tag is still here this tick
+  TickResult r = jukeboxStep(s, in);
+  TEST_ASSERT_TRUE(r.state.sleepStopped);
+  TEST_ASSERT_TRUE(r.state.tagPresent);                   // still there physically
+  TEST_ASSERT_FALSE(hasAction(r.actions, Action::TriggerPlayback));  // suppressed
+}
+
+void test_fsm_sleep_timer_then_tag_stays_does_not_replay() {
+  // The bug we're guarding: sleep timer fires, user leaves tag on reader.
+  // Subsequent ticks must NOT re-trigger playback no matter how long the
+  // tag stays.
+  JukeboxState s = jukeboxInitialState(0);
+  s.tagPresent = true;
+  s.sleepStopped = true;
+  for (int i = 0; i < 10; i++) {
+    TickInput in = baseInput((uint32_t)(i * 100));
+    in.nfcFound = true;
+    TickResult r = jukeboxStep(s, in);
+    TEST_ASSERT_FALSE(hasAction(r.actions, Action::TriggerPlayback));
+    s = r.state;
+  }
+}
+
+// --- Power-save sleep entry --------------------------------------
+
+void test_fsm_idle_with_no_tag_eventually_sleeps() {
+  JukeboxState s = jukeboxInitialState(0);
+  s.lastActivityMs = 0;
+  TickInput in = baseInput(5UL * 60000UL);  // exactly the powersave threshold
+  in.powerSaveMinutes = 5;
+  TickResult r = jukeboxStep(s, in);
+  TEST_ASSERT_TRUE(hasAction(r.actions, Action::EnterSleep));
+  TEST_ASSERT_EQUAL(Mode::Sleeping, (int)r.state.mode);
+}
+
+void test_fsm_does_not_sleep_during_audio() {
+  JukeboxState s = jukeboxInitialState(0);
+  s.tagPresent = true;
+  s.lastActivityMs = 0;
+  TickInput in = baseInput(60UL * 60000UL);  // way past any threshold
+  in.audioPlaying = true;                    // …but audio is streaming
+  in.powerSaveMinutes = 5;
+  TickResult r = jukeboxStep(s, in);
+  TEST_ASSERT_FALSE(hasAction(r.actions, Action::EnterSleep));
+  TEST_ASSERT_EQUAL(Mode::Waiting, (int)r.state.mode);
+}
+
+void test_fsm_does_not_sleep_with_active_tag() {
+  // tagPresent && !sleepStopped → user is actively playing a tag, don't sleep
+  // even if idle (no encoder events).
+  JukeboxState s = jukeboxInitialState(0);
+  s.tagPresent = true;
+  s.lastActivityMs = 0;
+  TickInput in = baseInput(60UL * 60000UL);
+  in.powerSaveMinutes = 5;
+  TickResult r = jukeboxStep(s, in);
+  TEST_ASSERT_FALSE(hasAction(r.actions, Action::EnterSleep));
+}
+
+void test_fsm_sleeps_with_suppressed_tag() {
+  // After sleep timer fires (sleepStopped=true), the idle clock should run
+  // and eventually transition into display sleep.
+  JukeboxState s = jukeboxInitialState(0);
+  s.tagPresent = true;
+  s.sleepStopped = true;
+  s.lastActivityMs = 0;
+  TickInput in = baseInput(5UL * 60000UL);
+  in.nfcFound = true;  // tag still on reader
+  in.powerSaveMinutes = 5;
+  TickResult r = jukeboxStep(s, in);
+  TEST_ASSERT_TRUE(hasAction(r.actions, Action::EnterSleep));
+}
+
+void test_fsm_powersave_disabled_never_sleeps() {
+  JukeboxState s = jukeboxInitialState(0);
+  TickInput in = baseInput(999999UL);
+  in.powerSaveMinutes = 0;
+  TickResult r = jukeboxStep(s, in);
+  TEST_ASSERT_FALSE(hasAction(r.actions, Action::EnterSleep));
+}
+
+// --- Wake from sleep ---------------------------------------------
+
+void test_fsm_encoder_wakes_from_sleep() {
+  JukeboxState s = jukeboxInitialState(0);
+  s.mode = Mode::Sleeping;
+  TickInput in = baseInput(1000);
+  in.encoderEvent = EncEvent::Click;
+  TickResult r = jukeboxStep(s, in);
+  TEST_ASSERT_TRUE(hasAction(r.actions, Action::WakeFromSleep));
+  TEST_ASSERT_EQUAL(Mode::Waiting, (int)r.state.mode);
+}
+
+void test_fsm_hold_in_sleep_only_wakes_does_not_enter_menu() {
+  // ENC_HOLD while sleeping is consumed by the wake — no EnterMenu action,
+  // matching the pre-FSM behavior.
+  JukeboxState s = jukeboxInitialState(0);
+  s.mode = Mode::Sleeping;
+  TickInput in = baseInput(1000);
+  in.encoderEvent = EncEvent::Hold;
+  TickResult r = jukeboxStep(s, in);
+  TEST_ASSERT_TRUE(hasAction(r.actions, Action::WakeFromSleep));
+  TEST_ASSERT_FALSE(hasAction(r.actions, Action::EnterMenu));
+}
+
+void test_fsm_nfc_wakes_from_sleep_when_not_suppressed() {
+  JukeboxState s = jukeboxInitialState(0);
+  s.mode = Mode::Sleeping;
+  TickInput in = baseInput(1000);
+  in.nfcFound = true;
+  TickResult r = jukeboxStep(s, in);
+  TEST_ASSERT_TRUE(hasAction(r.actions, Action::WakeFromSleep));
+}
+
+void test_fsm_nfc_does_not_wake_when_sleep_stopped() {
+  // Tag was already on the reader when sleep timer fired; we don't want it
+  // to immediately wake the device after powerSave kicks in.
+  JukeboxState s = jukeboxInitialState(0);
+  s.mode = Mode::Sleeping;
+  s.sleepStopped = true;
+  s.tagPresent = true;
+  TickInput in = baseInput(1000);
+  in.nfcFound = true;
+  TickResult r = jukeboxStep(s, in);
+  TEST_ASSERT_FALSE(hasAction(r.actions, Action::WakeFromSleep));
+  TEST_ASSERT_EQUAL(Mode::Sleeping, (int)r.state.mode);
+}
+
+void test_fsm_sleep_idle_no_event_stays_asleep() {
+  JukeboxState s = jukeboxInitialState(0);
+  s.mode = Mode::Sleeping;
+  TickInput in = baseInput(1000);
+  TickResult r = jukeboxStep(s, in);
+  TEST_ASSERT_EQUAL_UINT8(0, r.actions.count);
+  TEST_ASSERT_EQUAL(Mode::Sleeping, (int)r.state.mode);
+}
+
+// --- Menu entry --------------------------------------------------
+
+void test_fsm_hold_enters_menu_from_waiting() {
+  JukeboxState s = jukeboxInitialState(0);
+  TickInput in = baseInput(500);
+  in.encoderEvent = EncEvent::Hold;
+  TickResult r = jukeboxStep(s, in);
+  TEST_ASSERT_TRUE(hasAction(r.actions, Action::EnterMenu));
+  // Mode stays Waiting in the FSM (menu is external).
+  TEST_ASSERT_EQUAL(Mode::Waiting, (int)r.state.mode);
+}
+
+void test_fsm_encoder_rotation_resets_idle_clock() {
+  // Even without other actions, rotation should reset lastActivityMs so the
+  // idle counter restarts.
+  JukeboxState s = jukeboxInitialState(0);
+  s.lastActivityMs = 0;
+  TickInput in = baseInput(1000);
+  in.encoderEvent = EncEvent::Rotated;
+  TickResult r = jukeboxStep(s, in);
+  TEST_ASSERT_EQUAL_UINT32(1000, r.state.lastActivityMs);
+}
+
+// --- Full scenario: the bug we're guarding ------------------------
+
+void test_fsm_full_sleep_timer_recovery_scenario() {
+  // 1) Idle waiting. 2) Tag arrives → playback triggers. 3) Sleep timer fires
+  // mid-play (set externally via sleepTimerJustFired). 4) Tag stays on
+  // reader — no re-trigger. 5) PowerSave elapses → display sleep with tag
+  // still present. 6) NFC poll does NOT wake (sleepStopped). 7) User
+  // presses encoder → wake. 8) User removes tag → ConfirmTagRemoved
+  // (sleepStopped cleared). 9) Same tag back → playback triggers fresh.
+  JukeboxState s = jukeboxInitialState(0);
+
+  // 2) Tag arrives at t=1s.
+  TickInput a = baseInput(1000); a.nfcFound = true;
+  TickResult r = jukeboxStep(s, a); s = r.state;
+  TEST_ASSERT_TRUE(hasAction(r.actions, Action::TriggerPlayback));
+
+  // 3) Tag is still on reader at t=2s and sleep timer just fired.
+  TickInput b = baseInput(2000); b.nfcFound = true; b.sleepTimerJustFired = true;
+  r = jukeboxStep(s, b); s = r.state;
+  TEST_ASSERT_TRUE(s.sleepStopped);
+  TEST_ASSERT_FALSE(hasAction(r.actions, Action::TriggerPlayback));
+
+  // 4) Tag stays — several ticks, no replay.
+  for (int i = 0; i < 5; i++) {
+    TickInput k = baseInput(2000 + (uint32_t)(i * 100)); k.nfcFound = true;
+    r = jukeboxStep(s, k); s = r.state;
+    TEST_ASSERT_FALSE(hasAction(r.actions, Action::TriggerPlayback));
+  }
+
+  // 5) Idle past powerSaveMinutes (5 min from sleepStopped reset at t=2000).
+  TickInput c = baseInput(2000 + 5UL * 60000UL); c.nfcFound = true;
+  c.powerSaveMinutes = 5;
+  r = jukeboxStep(s, c); s = r.state;
+  TEST_ASSERT_TRUE(hasAction(r.actions, Action::EnterSleep));
+  TEST_ASSERT_EQUAL(Mode::Sleeping, (int)s.mode);
+
+  // 6) NFC poll while suppressed-asleep does NOT wake.
+  TickInput d = baseInput(2000 + 5UL * 60000UL + 1000); d.nfcFound = true;
+  r = jukeboxStep(s, d); s = r.state;
+  TEST_ASSERT_FALSE(hasAction(r.actions, Action::WakeFromSleep));
+  TEST_ASSERT_EQUAL(Mode::Sleeping, (int)s.mode);
+
+  // 7) Encoder press wakes.
+  TickInput e = baseInput(2000 + 5UL * 60000UL + 2000);
+  e.encoderEvent = EncEvent::Click;
+  r = jukeboxStep(s, e); s = r.state;
+  TEST_ASSERT_TRUE(hasAction(r.actions, Action::WakeFromSleep));
+  TEST_ASSERT_EQUAL(Mode::Waiting, (int)s.mode);
+  TEST_ASSERT_TRUE(s.sleepStopped);  // still suppressed until removal
+
+  // 8) Tag removed for 3 consecutive misses.
+  for (int i = 0; i < 3; i++) {
+    TickInput f = baseInput(2000 + 5UL * 60000UL + 3000 + (uint32_t)(i * 100));
+    r = jukeboxStep(s, f); s = r.state;
+  }
+  TEST_ASSERT_FALSE(s.sleepStopped);
+  TEST_ASSERT_FALSE(s.tagPresent);
+
+  // 9) Same tag returns → fresh playback trigger.
+  TickInput g = baseInput(2000 + 5UL * 60000UL + 4000); g.nfcFound = true;
+  r = jukeboxStep(s, g); s = r.state;
+  TEST_ASSERT_TRUE(hasAction(r.actions, Action::TriggerPlayback));
+}
+
+// ----------------------------------------------------------------
 //  Unity entry point
 // ----------------------------------------------------------------
 
@@ -504,6 +852,29 @@ int main() {
   RUN_TEST(test_format_countdown_one_minute);
   RUN_TEST(test_format_countdown_minute_and_seconds);
   RUN_TEST(test_format_countdown_two_hour_max);
+
+  RUN_TEST(test_fsm_initial_state_is_waiting_idle);
+  RUN_TEST(test_fsm_tag_arrival_triggers_playback);
+  RUN_TEST(test_fsm_no_retrigger_while_tag_present);
+  RUN_TEST(test_fsm_arrival_suppressed_when_sleep_stopped);
+  RUN_TEST(test_fsm_tag_removal_requires_three_misses);
+  RUN_TEST(test_fsm_intermittent_glitch_does_not_remove_tag);
+  RUN_TEST(test_fsm_removal_clears_sleep_stopped);
+  RUN_TEST(test_fsm_sleep_timer_fired_sets_sleep_stopped);
+  RUN_TEST(test_fsm_sleep_timer_then_tag_stays_does_not_replay);
+  RUN_TEST(test_fsm_idle_with_no_tag_eventually_sleeps);
+  RUN_TEST(test_fsm_does_not_sleep_during_audio);
+  RUN_TEST(test_fsm_does_not_sleep_with_active_tag);
+  RUN_TEST(test_fsm_sleeps_with_suppressed_tag);
+  RUN_TEST(test_fsm_powersave_disabled_never_sleeps);
+  RUN_TEST(test_fsm_encoder_wakes_from_sleep);
+  RUN_TEST(test_fsm_hold_in_sleep_only_wakes_does_not_enter_menu);
+  RUN_TEST(test_fsm_nfc_wakes_from_sleep_when_not_suppressed);
+  RUN_TEST(test_fsm_nfc_does_not_wake_when_sleep_stopped);
+  RUN_TEST(test_fsm_sleep_idle_no_event_stays_asleep);
+  RUN_TEST(test_fsm_hold_enters_menu_from_waiting);
+  RUN_TEST(test_fsm_encoder_rotation_resets_idle_clock);
+  RUN_TEST(test_fsm_full_sleep_timer_recovery_scenario);
 
   return UNITY_END();
 }

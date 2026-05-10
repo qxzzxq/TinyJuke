@@ -3,8 +3,7 @@
 
 // tagDoc, uidToStr() and lookupTag() live in tag_utils.cpp so the native test
 // environment can compile them without pulling in <Arduino.h>/<Serial>.
-
-bool sdReady = false;
+// sdReady lives in main.cpp (the SD-init owner) — see storage.h.
 
 void printHex(const uint8_t *data, uint8_t len) {
   for (uint8_t i = 0; i < len; i++) {
