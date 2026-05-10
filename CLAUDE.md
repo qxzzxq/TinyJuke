@@ -161,6 +161,7 @@ Board: `lolin_d32_pro`, framework: `arduino`, CPU: 240 MHz, partitions: `huge_ap
   1. **Verify it compiles** — run `~/.platformio/penv/bin/pio run` and fix any syntax or compile-time errors before considering the change complete. Never leave the project in a state that fails to build.
   2. **Cross-validate docs** — check CLAUDE.md and README.md against the actual source files. Update any stale descriptions — pin maps, source file trees, architecture flows, status, constraints, SD card layout, and TODO lists. These documents are the source of truth for future agents and contributors; drift between docs and code compounds over time.
 
+- increment version
 
 ## Known constraints
 
