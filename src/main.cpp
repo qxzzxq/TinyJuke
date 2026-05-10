@@ -64,9 +64,9 @@ void setup() {
   delay(200);
   Serial.println("\nESP Jukebox starting...");
 
-  // 1. Init TFT (backlight at full brightness via LEDC PWM)
+  // 1. Init TFT (start with backlight off to avoid power-on noise)
   ledcAttach(TFT_BL, BRIGHTNESS_PWM_FREQ, BRIGHTNESS_PWM_RES);
-  ledcWrite(TFT_BL, 255);
+  ledcWrite(TFT_BL, 0);
   gfx.begin();
 
   // 2. Init SD
@@ -95,15 +95,14 @@ void setup() {
     Serial.println("FAILED");
   }
 
-  // 3. Boot screen (drawn before backlight on to avoid init artifacts)
+  // 3. Boot screen (drawn with backlight off to avoid power-on noise)
   if (!sdReady) {
     drawSDErrorScreen();
-    delay(3000);
   } else {
     gfx.fillScreen(C_BG);
     drawWaitingScreen();
   }
-  // Backlight already at 255 from step 1
+  ledcWrite(TFT_BL, 255);  // turn on backlight once content is ready
 
   // 3.5 Prime I2S pins so MAX98357A BCLK isn't floating (touch-sensitive)
   i2sPrime();

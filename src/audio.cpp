@@ -56,9 +56,7 @@ static bool i2sInit(const WavHeader &hdr) {
   cfg.bits_per_sample      = (hdr.bitsPerSample == 16)
                                  ? I2S_BITS_PER_SAMPLE_16BIT
                                  : I2S_BITS_PER_SAMPLE_24BIT;
-  cfg.channel_format       = (hdr.channels == 1)
-                                 ? I2S_CHANNEL_FMT_ONLY_LEFT
-                                 : I2S_CHANNEL_FMT_RIGHT_LEFT;
+  cfg.channel_format       = I2S_CHANNEL_FMT_RIGHT_LEFT;
   cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
   cfg.intr_alloc_flags     = ESP_INTR_FLAG_LEVEL1;
   cfg.dma_desc_num         = 8;
@@ -148,6 +146,8 @@ void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t ta
   stopRequested = false;
 
   const size_t CHUNK = 2048;
+  bool mono16 = (hdr.channels == 1 && hdr.bitsPerSample == 16);
+  size_t readSize = mono16 ? CHUNK / 2 : CHUNK;
   uint8_t *buf = (uint8_t *)malloc(CHUNK);
   if (!buf) { Serial.println("OOM"); f.close(); return; }
 
@@ -162,7 +162,7 @@ void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t ta
   bool     volOverlayVisible = false;
 
   while (remaining > 0 && !stopRequested) {
-    size_t toRead = (remaining < CHUNK) ? (size_t)remaining : CHUNK;
+    size_t toRead = (remaining < readSize) ? (size_t)remaining : readSize;
     size_t bytesRead = f.read(buf, toRead);
     if (bytesRead == 0) break;
 
@@ -175,10 +175,25 @@ void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t ta
         samples[i] = (int16_t)(samples[i] * scale);
     }
 
+    // Duplicate mono channel to both L+R so it matches stereo loudness
+    size_t i2sBytes = bytesRead;
+    if (mono16) {
+      size_t n = bytesRead / 2;
+      for (size_t i = n; i > 0; i--) {
+        int16_t s = ((int16_t *)buf)[i - 1];
+        ((int16_t *)buf)[(i - 1) * 2]     = s;
+        ((int16_t *)buf)[(i - 1) * 2 + 1] = s;
+      }
+      i2sBytes = bytesRead * 2;
+    }
+
     size_t bytesWritten;
-    if (i2s_write(I2S_NUM_0, buf, bytesRead, &bytesWritten, pdMS_TO_TICKS(100)) != ESP_OK)
+    if (i2s_write(I2S_NUM_0, buf, i2sBytes, &bytesWritten, pdMS_TO_TICKS(100)) != ESP_OK)
       break;
-    remaining -= bytesWritten;
+    // For mono: i2s bytes are doubled, so file bytes consumed = i2s bytes / 2
+    uint32_t consumed = mono16 ? (uint32_t)(bytesWritten / 2) : (uint32_t)bytesWritten;
+    if (consumed > remaining) consumed = remaining;
+    remaining -= consumed;
 
     handleWebClient();
 
