@@ -1,12 +1,13 @@
 #include "encoder.h"
-#include "tags.h"
+#include "encoder_gray.h"
+#include "value_array.h"
+#include "storage.h"
 #include <SD.h>
 
 int volumeLevel      = VOLUME_DEFAULT;
 int brightnessLevel  = BRIGHTNESS_DEFAULT;
 int powerSaveMinutes = POWERSAVE_DEFAULT;
 int sleepTimerMinutes = SLEEPTIMER_DEFAULT;
-bool sleeping        = false;
 
 // --- Gray-code state machine ---
 // Tracks the full 2-bit quadrature state. Only valid gray-code transitions
@@ -18,29 +19,8 @@ static          uint8_t encState;  // current (CLK<<1)|DT
 
 static void IRAM_ATTR encISR() {
   uint8_t s = (digitalRead(ENC_DT) << 1) | digitalRead(ENC_CLK);
-  if (s == encState) return;
-
-  int dir = 0;
-  switch (encState) {
-    case 0:  // 00
-      if (s == 1) dir =  1;  // 00→01 CW
-      if (s == 2) dir = -1;  // 00→10 CCW
-      break;
-    case 1:  // 01
-      if (s == 3) dir =  1;  // 01→11 CW
-      if (s == 0) dir = -1;  // 01→00 CCW
-      break;
-    case 3:  // 11
-      if (s == 2) dir =  1;  // 11→10 CW
-      if (s == 1) dir = -1;  // 11→01 CCW
-      break;
-    case 2:  // 10
-      if (s == 0) dir =  1;  // 10→00 CW
-      if (s == 3) dir = -1;  // 10→11 CCW
-      break;
-  }
+  int dir = grayStep(encState, s);
   encState = s;
-
   if (dir != 0) {
     encAccum += dir;
     if (encAccum >=  4) { encDelta = encDelta + 1; encAccum = 0; }
@@ -192,15 +172,11 @@ void savePowerSave() {
 }
 
 int powerSaveToIndex(int minutes) {
-  for (int i = 0; i < POWERSAVE_COUNT; i++)
-    if (POWERSAVE_VALUES[i] == minutes) return i;
-  return 0;
+  return valueToIndex(POWERSAVE_VALUES, POWERSAVE_COUNT, minutes);
 }
 
 int powerSaveToMinutes(int index) {
-  if (index < 0) index = 0;
-  if (index >= POWERSAVE_COUNT) index = POWERSAVE_COUNT - 1;
-  return POWERSAVE_VALUES[index];
+  return indexToValue(POWERSAVE_VALUES, POWERSAVE_COUNT, index);
 }
 
 // ----------------------------------------------------------------
@@ -242,13 +218,9 @@ void saveSleepTimer() {
 }
 
 int sleepTimerToIndex(int minutes) {
-  for (int i = 0; i < SLEEP_COUNT; i++)
-    if (SLEEP_VALUES[i] == minutes) return i;
-  return 0;
+  return valueToIndex(SLEEP_VALUES, SLEEP_COUNT, minutes);
 }
 
 int sleepTimerToMinutes(int index) {
-  if (index < 0) index = 0;
-  if (index >= SLEEP_COUNT) index = SLEEP_COUNT - 1;
-  return SLEEP_VALUES[index];
+  return indexToValue(SLEEP_VALUES, SLEEP_COUNT, index);
 }

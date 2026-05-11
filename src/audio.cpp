@@ -1,6 +1,7 @@
 #include "audio.h"
 #include "screen.h"
 #include "encoder.h"
+#include "timer_logic.h"
 #include <driver/i2s.h>
 
 bool audioPlaying = false;
@@ -83,41 +84,13 @@ static bool i2sInit(const WavHeader &hdr) {
 }
 
 static bool parseWavHeader(File &f, WavHeader &hdr) {
-  uint8_t buf[64];
-  if (f.read(buf, 44) != 44) return false;
-  if (memcmp(buf, "RIFF", 4) != 0) return false;
-  if (memcmp(buf + 8, "WAVE", 4) != 0) return false;
-
-  uint32_t pos = 12;
-  while (pos < 256) {
-    f.seek(pos);
-    if (f.read(buf, 8) != 8) return false;
-    if (memcmp(buf, "fmt ", 4) == 0) {
-      uint32_t fmtSize = buf[4] | (buf[5] << 8) | (buf[6] << 16) | (buf[7] << 24);
-      if (fmtSize < 16 || fmtSize > 64) return false;
-      if (f.read(buf, fmtSize) != fmtSize) return false;
-      hdr.channels      = buf[2]  | (buf[3] << 8);
-      hdr.sampleRate    = buf[4]  | (buf[5] << 8) | (buf[6] << 16) | (buf[7] << 24);
-      hdr.bitsPerSample = buf[14] | (buf[15] << 8);
-      pos = 12 + 8 + fmtSize;
-      break;
-    }
-    pos += 8 + (buf[4] | (buf[5] << 8) | (buf[6] << 16) | (buf[7] << 24));
-  }
-  if (pos >= 256) return false;
-
-  while (pos < 4096) {
-    f.seek(pos);
-    if (f.read(buf, 8) != 8) return false;
-    uint32_t chunkSize = buf[4] | (buf[5] << 8) | (buf[6] << 16) | (buf[7] << 24);
-    if (memcmp(buf, "data", 4) == 0) {
-      hdr.dataSize   = chunkSize;
-      hdr.dataOffset = pos + 8;
-      return true;
-    }
-    pos += 8 + chunkSize;
-  }
-  return false;
+  // Read first 4 KB into a stack buffer; the data chunk must lie within
+  // this window per the buffer parser's contract.
+  uint8_t buf[4096];
+  size_t toRead = f.size() < sizeof(buf) ? f.size() : sizeof(buf);
+  f.seek(0);
+  size_t n = f.read(buf, toRead);
+  return parseWavHeaderBuffer(buf, n, hdr);
 }
 
 // ----------------------------------------------------------------
@@ -219,9 +192,7 @@ void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t ta
       clearPlaybackVolumeOverlay();
       volOverlayVisible = false;
       if (countdownVisible) {
-        unsigned long elapsed = millis() - audioStartTime;
-        unsigned long totalMs = (unsigned long)sleepTimerMinutes * 60000UL;
-        unsigned long remaining = (elapsed < totalMs) ? (totalMs - elapsed) : 0;
+        uint32_t remaining = timerRemainingMs(sleepTimerMinutes, millis() - audioStartTime);
         drawSleepTimerCountdown(remaining);
       }
     }
@@ -231,15 +202,13 @@ void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t ta
       uint32_t now = millis();
       if (now - lastCountdownUpdate >= 1000) {
         lastCountdownUpdate = now;
-        unsigned long elapsed = now - audioStartTime;
-        unsigned long totalMs = (unsigned long)sleepTimerMinutes * 60000UL;
-        unsigned long remaining = (elapsed < totalMs) ? (totalMs - elapsed) : 0;
+        uint32_t remaining = timerRemainingMs(sleepTimerMinutes, now - audioStartTime);
         updateSleepTimerCountdown(remaining);
       }
     }
 
     // Audio sleep timer: stop playback after configured duration (one-shot)
-    if (sleepTimerMinutes > 0 && millis() - audioStartTime >= (uint32_t)sleepTimerMinutes * 60000UL) {
+    if (sleepTimerShouldFire(sleepTimerMinutes, millis() - audioStartTime)) {
       sleepTimerMinutes = 0;
       saveSleepTimer();
       sleepTimerFired = true;
@@ -292,48 +261,17 @@ void parseWavMeta(const char *filepath, WavMeta &meta) {
   File f = SD.open(path);
   if (!f) return;
 
-  uint8_t buf[12];
-  if (f.read(buf, 12) != 12) { f.close(); return; }
-  if (memcmp(buf, "RIFF", 4) != 0) { f.close(); return; }
+  // LIST INFO is conventionally near the front of the file; cap scan to 64 KB.
+  const size_t MAX = 65536;
+  size_t fileSize = (size_t)f.size();
+  size_t toRead = fileSize < MAX ? fileSize : MAX;
+  uint8_t *buf = (uint8_t *)malloc(toRead);
+  if (!buf) { f.close(); return; }
 
-  uint32_t riffSize = buf[4] | (buf[5] << 8) | (buf[6] << 16) | (buf[7] << 24);
-  uint32_t pos = 12;
-  uint32_t end = riffSize + 8;
-  if (end > 500000) end = 500000;
+  f.seek(0);
+  size_t n = f.read(buf, toRead);
+  parseWavMetaBuffer(buf, n, meta);
 
-  while (pos + 8 < end) {
-    f.seek(pos);
-    if (f.read(buf, 8) != 8) break;
-    uint32_t size = buf[4] | (buf[5] << 8) | (buf[6] << 16) | (buf[7] << 24);
-
-    if (memcmp(buf, "LIST", 4) == 0 && size >= 4) {
-      if (f.read(buf, 4) != 4) break;
-      if (memcmp(buf, "INFO", 4) != 0) { pos += 8 + size; continue; }
-
-      uint32_t infoEnd = pos + 8 + size;
-      pos += 12;
-
-      while (pos + 8 < infoEnd) {
-        f.seek(pos);
-        if (f.read(buf, 8) != 8) break;
-        uint32_t sub = buf[4] | (buf[5] << 8) | (buf[6] << 16) | (buf[7] << 24);
-
-        char *dst = nullptr;
-        int max = 0;
-        if      (memcmp(buf, "INAM", 4) == 0) { dst = meta.title;  max = 63; }
-        else if (memcmp(buf, "IART", 4) == 0) { dst = meta.artist; max = 63; }
-
-        if (dst && sub > 0) {
-          int n = (sub < max) ? sub : max;
-          f.read((uint8_t *)dst, n);
-          dst[n] = '\0';
-          while (n > 0 && (dst[n-1] == 0 || dst[n-1] == ' ')) dst[--n] = '\0';
-        }
-        pos += 8 + sub + (sub & 1);
-      }
-      break;
-    }
-    pos += 8 + size;
-  }
+  free(buf);
   f.close();
 }
