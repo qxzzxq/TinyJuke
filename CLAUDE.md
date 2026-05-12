@@ -4,7 +4,7 @@
 
 RFID-driven audio player. Scan an NFC tag → lookup UID in `tags.json` on SD card → play the mapped WAV file through a MAX98357A I²S amplifier. Built on a Lolin D32 Pro (ESP32) with Arduino framework on PlatformIO. Display: ST7789V 240×320.
 
-**Status:** Milestone 3 in progress — tag hot-swap detection, brightness / power-save / sleep-timer settings persisted to SD, BMP album art (240×240, scaled in PSRAM), version screen, image upload, and amp-touch-noise mitigation via I2S priming.
+**Status:** Milestone 3 in progress — tag hot-swap detection, brightness / power-save / sleep-timer settings persisted to SD, BMP album art (240×240, scaled in PSRAM), version screen, image upload, browser-side MP3/M4A/AAC/OGG/FLAC → WAV conversion with embedded-art extraction, and amp-touch-noise mitigation via I2S priming.
 
 ## Pin map
 
@@ -189,7 +189,7 @@ What's covered: `uidToStr`, `lookupTag`, `parseWavHeaderBuffer`, `parseWavMetaBu
 - **I2S uses legacy driver:** The `driver/i2s.h` API is deprecated in ESP-IDF 5.x. It works but emits warnings. Migration to `i2s_std.h` is a future task.
 - **Single audio track at a time:** No crossfade or queue. Tag swaps mid-playback are detected (in both `playWav()` and the main loop) — a different UID stops the current track and the new tag is picked up on the next loop iteration. The same tag left on the reader replays the track in a `while (tagPresent)` loop.
 - **WAV only:** Standard PCM WAV (16/24-bit, mono/stereo, any sample rate). No MP3/FLAC support.
-- **Web server uses AP mode:** `WIFI_SSID` / `WIFI_PASSWORD` from config.h. Exposes REST API: `/api/tags` (list), `/api/tag` (POST upsert / DELETE / OPTIONS), `/api/files`, `/api/images`, `/img?name=` (serve BMP), `/upload` (WAV multipart), `/upload-img` (image multipart). Serves a single-page web app at `/`. Web server only runs while the GUI is on the WEB screen — leaving the WEB screen calls `stopWebServer()`.
+- **Web server uses AP mode:** `WIFI_SSID` / `WIFI_PASSWORD` from config.h. Exposes REST API: `/api/tags` (list), `/api/tag` (POST upsert / DELETE / OPTIONS), `/api/files`, `/api/images`, `/img?name=` (serve BMP), `/upload` (WAV multipart), `/upload-img` (image multipart). Serves a single-page web app at `/`. The SPA itself accepts WAV/MP3/M4A/AAC/OGG/FLAC for audio upload — non-WAV inputs are decoded via `AudioContext.decodeAudioData` and resampled to 44.1 kHz 16-bit mono via `OfflineAudioContext` entirely client-side, then uploaded as WAV. Embedded cover art (ID3v2 APIC, MP4 `covr`, FLAC PICTURE) is extracted in JS, centre-cropped to 300×300 24-bit BMP via a canvas, and uploaded to `/img/` with the same basename. The firmware-side `/upload` and `/upload-img` handlers remain WAV/BMP-only — no server-side decoding. Web server only runs while the GUI is on the WEB screen — leaving the WEB screen calls `stopWebServer()`.
 - **Heap is tight:** BMP loader allocates a raw image buffer (PSRAM preferred via `heap_caps_malloc(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)`, DRAM fallback) plus a 240×240×2 = 115 KB scaled buffer in `drawNowPlayingScreen`. Source BMPs up to 600×600 24-bit are accepted; larger or non-24-bit BMPs are rejected. `playWav()` allocates a 2 KB chunk buffer. Avoid additional large heap allocations; prefer stack or static buffers where possible.
 
 ## Other important remarks
