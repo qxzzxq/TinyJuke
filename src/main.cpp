@@ -193,6 +193,7 @@ static void runPlayback(const uint8_t *uid, uint8_t uidLength) {
     // Quick NFC check: detect tag removal or tag swap before replay
     uint8_t u[10]; uint8_t uLen = 0;
     if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 50)) {
+      Serial.println("Tag removed.");
       localPresent = false;
       s_state.tagPresent = false;
       s_state.lastActivityMs = millis();

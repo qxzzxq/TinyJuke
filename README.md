@@ -97,7 +97,7 @@ Each NFC tag UID maps to a single audio file on the SD card. When a tag is scann
 4. Replacing the tag with a different known tag during playback switches to the new track (hot-swap)
 5. Removing the tag stops playback
 6. Rotate the encoder to adjust volume (overlay bar appears, auto-saves after 5 seconds of inactivity)
-7. When idle on the waiting screen, the display turns off after the configured Power Saving timeout (default 15 min). Twist the encoder or scan a tag to wake.
+7. When idle on the waiting screen, the display turns off after the configured Power Saving timeout (default 15 min). Twist/press the encoder or scan a tag to wake.
 8. If a Sleep Timer is configured, an on-screen countdown is shown during playback and audio stops when the timer reaches zero (the tag must be removed/replaced before a new track will play).
 
 Unknown tags are displayed on screen for 10 seconds with their UID — click or hold the encoder to dismiss, or remove/replace the tag.
@@ -109,8 +109,9 @@ Hold the encoder button (>600ms) to enter the management menu, then select "Web 
 The web interface provides:
 - **Tag grid** — browse all registered tags with album art, title, and artist
 - **Add / Edit / Remove tags** — link any NFC tag UID to a WAV file on the SD card with optional metadata
-- **WAV upload** — upload WAV files directly to `/music/` over WiFi (`POST /upload`)
-- **Image upload** — upload BMP/JPG/PNG album art to `/img/` (`POST /upload-img`)
+- **Audio upload** — upload WAV/MP3/M4A/AAC/OGG/FLAC. Non-WAV files are decoded and resampled in the browser to 44.1 kHz 16-bit mono WAV, then uploaded to `/music/` (`POST /upload`). The progress bar shows decode → resample → encode → upload stages.
+- **Embedded album art** — when an uploaded MP3 / M4A / FLAC carries embedded cover art (ID3v2 APIC, MP4 `covr`, or FLAC PICTURE block), it is auto-extracted, centre-cropped, scaled to 300×300, written as 24-bit BMP, and uploaded to `/img/` alongside the audio. The resulting `.bmp` shares the audio file's basename so it can be picked in the tag editor.
+- **Image upload** — manually upload BMP/JPG/PNG album art to `/img/` (`POST /upload-img`)
 - **Album art picker** — choose any image in `/img/` when editing a tag (served via `GET /img?name=...`)
 
 Changes are written to `/tags.json` on the SD card immediately.
@@ -179,7 +180,7 @@ All fields except `file` are optional. `img` paths are relative to `/img/` on th
 
 ## Status
 
-Milestone 3 in progress. Implemented: web-based tag management, WAV + image upload, runtime volume control, encoder-driven GUI with Brightness / Power Saving / Sleep Timer / Version screens, BMP album art (240×240, scaled in PSRAM), tag hot-swap detection, and amp-touch-noise mitigation via I2S priming.
+Milestone 3 in progress. Implemented: web-based tag management, WAV + image upload, browser-side MP3/M4A/AAC/OGG/FLAC → WAV conversion with embedded-art extraction, runtime volume control, encoder-driven GUI with Brightness / Power Saving / Sleep Timer / Version screens, BMP album art (240×240, scaled in PSRAM), tag hot-swap detection, and amp-touch-noise mitigation via I2S priming.
 
 ## TODO
 

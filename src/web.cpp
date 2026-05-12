@@ -59,6 +59,8 @@ h1{font-size:22px;color:#4ADE80;font-weight:700}
 #upload-panel label,#upload-img-panel label{font-size:13px;color:#6B7B8D;display:block;margin-bottom:8px}
 #upload-panel input[type=file],#upload-img-panel input[type=file]{color:#eee;margin-bottom:8px;width:100%}
 #upload-progress,#upload-img-progress{width:100%;height:6px;display:none;accent-color:#4ADE80}
+#upload-status,#upload-img-status{font-size:12px;color:#6B7B8D;margin-top:8px;min-height:14px}
+#btn-upload-start:disabled,#btn-img-upload-start:disabled{opacity:.5;cursor:default}
 
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:100;padding:16px}
 .modal-box{background:#111A2E;border-radius:12px;width:100%;max-width:420px;max-height:90vh;overflow-y:auto;border:1px solid #1E293B;animation:modalIn .2s ease}
@@ -94,24 +96,26 @@ h1{font-size:22px;color:#4ADE80;font-weight:700}
 <div id="pagination"></div>
 <div id="actions">
 <button id="btn-add">+ Add Tag</button>
-<button id="btn-upload">Upload WAV</button>
+<button id="btn-upload">Upload Audio</button>
 <button id="btn-upload-img">Upload Image</button>
 </div>
 <div id="upload-panel">
-<label>Select a WAV file to upload to the SD card:</label>
-<input type="file" id="file-input" accept=".wav,.WAV">
+<label>Select an audio file (WAV / MP3 / M4A / AAC / OGG / FLAC). Non-WAV files are converted in your browser to 44.1 kHz 16-bit mono WAV. Embedded album art (if any) is saved as a 300x300 BMP.</label>
+<input type="file" id="file-input" accept="audio/*,.mp3,.m4a,.aac,.ogg,.oga,.flac,.wav">
 <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
-<button id="btn-upload-start">Start Upload</button>
-<progress id="upload-progress" max="100" value="0"></progress>
+<button id="btn-upload-start">Convert &amp; Upload</button>
 </div>
+<div id="upload-status"></div>
+<progress id="upload-progress" max="100" value="0"></progress>
 </div>
 <div id="upload-img-panel">
 <label>Select an image file (BMP/JPG/PNG) to upload:</label>
 <input type="file" id="img-file-input" accept=".bmp,.jpg,.jpeg,.png">
 <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
 <button id="btn-img-upload-start">Start Upload</button>
-<progress id="upload-img-progress" max="100" value="0"></progress>
 </div>
+<div id="upload-img-status"></div>
+<progress id="upload-img-progress" max="100" value="0"></progress>
 </div>
 </div>
 
@@ -348,15 +352,293 @@ var p=document.getElementById('upload-img-panel');
 p.style.display=p.style.display==='none'?'block':'none';
 });
 
-function doUpload(url, file, progEl, onDone){
+var AC=window.AudioContext||window.webkitAudioContext;
+var OAC=window.OfflineAudioContext||window.webkitOfflineAudioContext;
+var TARGET_RATE=44100;
+
+function baseName(name){
+var i=name.lastIndexOf('.');
+return i>0?name.substring(0,i):name;
+}
+
+function isWavName(name){return /\.wav$/i.test(name);}
+
+function setUploadStatus(msg,pct){
+var s=document.getElementById('upload-status');
+var p=document.getElementById('upload-progress');
+s.textContent=msg||'';
+if(!msg){p.style.display='none';p.removeAttribute('value');return;}
+p.style.display='block';
+if(pct===undefined||pct===null){p.removeAttribute('value');}
+else{p.value=Math.max(0,Math.min(100,pct));}
+}
+
+function uploadBlob(url,blob,filename,onProgress){
+return new Promise(function(resolve,reject){
+var xhr=new XMLHttpRequest();
+xhr.open('POST',url);
+xhr.upload.onprogress=function(e){
+if(e.lengthComputable&&onProgress)onProgress(100*e.loaded/e.total);
+};
+xhr.onload=function(){
+try{
+var d=JSON.parse(xhr.responseText);
+if(d.ok)resolve(d);
+else reject(new Error(d.error||'Upload failed'));
+}catch(err){reject(new Error('Upload failed'));}
+};
+xhr.onerror=function(){reject(new Error('Upload failed'));};
+var form=new FormData();
+form.append('file',blob,filename);
+xhr.send(form);
+});
+}
+
+function pcmToWavBlob(f32,rate){
+var n=f32.length;
+var buf=new ArrayBuffer(44+n*2);
+var v=new DataView(buf);
+function ws(o,str){for(var i=0;i<str.length;i++)v.setUint8(o+i,str.charCodeAt(i));}
+ws(0,'RIFF');v.setUint32(4,36+n*2,true);ws(8,'WAVE');
+ws(12,'fmt ');v.setUint32(16,16,true);
+v.setUint16(20,1,true);v.setUint16(22,1,true);
+v.setUint32(24,rate,true);v.setUint32(28,rate*2,true);
+v.setUint16(32,2,true);v.setUint16(34,16,true);
+ws(36,'data');v.setUint32(40,n*2,true);
+var off=44;
+for(var i=0;i<n;i++){
+var x=f32[i];
+if(x<-1)x=-1;else if(x>1)x=1;
+v.setInt16(off,x<0?x*0x8000:x*0x7FFF,true);
+off+=2;
+}
+return new Blob([buf],{type:'audio/wav'});
+}
+
+async function decodeAndResample(file){
+setUploadStatus('Reading file…',null);
+var ab=await file.arrayBuffer();
+var bytes=new Uint8Array(ab);
+var art=extractAlbumArt(bytes);
+setUploadStatus('Decoding audio…',null);
+var ac=new AC();
+var audioBuf;
+try{audioBuf=await ac.decodeAudioData(ab.slice(0));}
+finally{if(ac.close)ac.close();}
+setUploadStatus('Resampling to 44.1 kHz mono…',null);
+var frames=Math.max(1,Math.ceil(audioBuf.duration*TARGET_RATE));
+var oac=new OAC(1,frames,TARGET_RATE);
+var src=oac.createBufferSource();
+src.buffer=audioBuf;
+src.connect(oac.destination);
+src.start();
+var rendered=await oac.startRendering();
+setUploadStatus('Encoding WAV…',null);
+return {wav:pcmToWavBlob(rendered.getChannelData(0),TARGET_RATE),art:art};
+}
+
+function be32(b,o){return (b[o]*16777216)+(b[o+1]<<16)+(b[o+2]<<8)+b[o+3];}
+function syncsafe(a,b,c,d){return ((a&0x7F)<<21)|((b&0x7F)<<14)|((c&0x7F)<<7)|(d&0x7F);}
+
+function extractAlbumArt(b){
+try{
+if(b.length>10&&b[0]===0x49&&b[1]===0x44&&b[2]===0x33)return apicFromID3(b);
+if(b.length>4&&b[0]===0x66&&b[1]===0x4C&&b[2]===0x61&&b[3]===0x43)return pictureFromFlac(b);
+if(b.length>12&&b[4]===0x66&&b[5]===0x74&&b[6]===0x79&&b[7]===0x70)return coverFromMp4(b);
+}catch(e){}
+return null;
+}
+
+function apicFromID3(b){
+var major=b[3],flags=b[5];
+var tagSize=syncsafe(b[6],b[7],b[8],b[9]);
+var end=Math.min(10+tagSize,b.length);
+var pos=10;
+if(flags&0x40){
+var ext=major>=4?syncsafe(b[pos],b[pos+1],b[pos+2],b[pos+3]):be32(b,pos);
+pos+=ext;
+}
+var dec=new TextDecoder('utf-8',{fatal:false});
+while(pos+10<=end){
+var id=String.fromCharCode(b[pos],b[pos+1],b[pos+2],b[pos+3]);
+var size=major>=4?syncsafe(b[pos+4],b[pos+5],b[pos+6],b[pos+7]):be32(b,pos+4);
+if(id.charCodeAt(0)===0||size<=0||pos+10+size>end)break;
+if(id==='APIC'){
+var frameEnd=pos+10+size;
+var p=pos+10;
+var enc=b[p++];
+var mEnd=p;
+while(mEnd<frameEnd&&b[mEnd]!==0)mEnd++;
+var mime=dec.decode(b.slice(p,mEnd));
+p=mEnd+1;
+p++;
+if(enc===1||enc===2){
+while(p+1<frameEnd&&!(b[p]===0&&b[p+1]===0))p+=2;
+p+=2;
+}else{
+while(p<frameEnd&&b[p]!==0)p++;
+p++;
+}
+if(p>=frameEnd)return null;
+return {mime:mime||'image/jpeg',bytes:b.slice(p,frameEnd)};
+}
+pos+=10+size;
+}
+return null;
+}
+
+function pictureFromFlac(b){
+var pos=4;
+var dec=new TextDecoder('utf-8',{fatal:false});
+while(pos+4<b.length){
+var h=b[pos];
+var isLast=(h&0x80)!==0;
+var type=h&0x7F;
+var size=(b[pos+1]<<16)|(b[pos+2]<<8)|b[pos+3];
+pos+=4;
+if(type===6&&pos+size<=b.length){
+var p=pos+4;
+var ml=be32(b,p);p+=4;
+var mime=dec.decode(b.slice(p,p+ml));p+=ml;
+var dl=be32(b,p);p+=4;
+p+=dl+16;
+var il=be32(b,p);p+=4;
+return {mime:mime||'image/jpeg',bytes:b.slice(p,p+il)};
+}
+if(isLast)break;
+pos+=size;
+}
+return null;
+}
+
+function coverFromMp4(b){
+function find(start,end,name){
+var p=start;
+while(p+8<=end){
+var sz=be32(b,p);
+var t=String.fromCharCode(b[p+4],b[p+5],b[p+6],b[p+7]);
+if(sz<8||p+sz>end)return null;
+if(t===name)return {start:p+8,end:p+sz};
+p+=sz;
+}
+return null;
+}
+var moov=find(0,b.length,'moov');if(!moov)return null;
+var udta=find(moov.start,moov.end,'udta');if(!udta)return null;
+var meta=find(udta.start,udta.end,'meta');if(!meta)return null;
+var ilst=find(meta.start+4,meta.end,'ilst');if(!ilst)return null;
+var covr=find(ilst.start,ilst.end,'covr');if(!covr)return null;
+var data=find(covr.start,covr.end,'data');if(!data)return null;
+var flag=be32(b,data.start);
+var mime=flag===13?'image/jpeg':(flag===14?'image/png':'image/jpeg');
+return {mime:mime,bytes:b.slice(data.start+8,data.end)};
+}
+
+async function artTo300Bmp(art){
+var blob=new Blob([art.bytes],{type:art.mime});
+var bmp=await createImageBitmap(blob);
+var canvas=document.createElement('canvas');
+canvas.width=300;canvas.height=300;
+var ctx=canvas.getContext('2d');
+ctx.imageSmoothingQuality='high';
+var sw=bmp.width,sh=bmp.height;
+var scale=Math.max(300/sw,300/sh);
+var dw=sw*scale,dh=sh*scale;
+ctx.drawImage(bmp,(300-dw)/2,(300-dh)/2,dw,dh);
+var img=ctx.getImageData(0,0,300,300);
+return rgba300ToBmp(img);
+}
+
+function rgba300ToBmp(img){
+var w=300,h=300;
+var rowSize=((24*w+31)>>5)<<2;
+var pixSize=rowSize*h;
+var fileSize=54+pixSize;
+var buf=new ArrayBuffer(fileSize);
+var v=new DataView(buf);
+var u=new Uint8Array(buf);
+v.setUint8(0,0x42);v.setUint8(1,0x4D);
+v.setUint32(2,fileSize,true);
+v.setUint32(6,0,true);
+v.setUint32(10,54,true);
+v.setUint32(14,40,true);
+v.setInt32(18,w,true);
+v.setInt32(22,h,true);
+v.setUint16(26,1,true);
+v.setUint16(28,24,true);
+v.setUint32(30,0,true);
+v.setUint32(34,pixSize,true);
+v.setInt32(38,2835,true);
+v.setInt32(42,2835,true);
+v.setUint32(46,0,true);
+v.setUint32(50,0,true);
+var px=img.data;
+for(var y=0;y<h;y++){
+var srcRow=(h-1-y)*w*4;
+var dstRow=54+y*rowSize;
+for(var x=0;x<w;x++){
+var si=srcRow+x*4,di=dstRow+x*3;
+u[di]=px[si+2];u[di+1]=px[si+1];u[di+2]=px[si];
+}
+}
+return new Blob([buf],{type:'image/bmp'});
+}
+
+async function handleAudioUpload(){
+var inp=document.getElementById('file-input');
+var f=inp.files[0];
+if(!f){toast('Please select a file first','err');return;}
+var btn=document.getElementById('btn-upload-start');
+btn.disabled=true;
+var base=baseName(f.name);
+try{
+var wavBlob,art=null;
+if(isWavName(f.name)){
+wavBlob=f;
+}else{
+var out=await decodeAndResample(f);
+wavBlob=out.wav;
+art=out.art;
+}
+setUploadStatus('Uploading audio…',0);
+var r=await uploadBlob('/upload',wavBlob,base+'.wav',function(p){
+setUploadStatus('Uploading audio…',p);
+});
+var audioName=r.filename||(base+'.wav');
+var artName='';
+if(art){
+try{
+setUploadStatus('Encoding album art…',null);
+var bmpBlob=await artTo300Bmp(art);
+setUploadStatus('Uploading album art…',0);
+var ri=await uploadBlob('/upload-img',bmpBlob,base+'.bmp',function(p){
+setUploadStatus('Uploading album art…',p);
+});
+artName=ri.filename||'';
+}catch(e){
+toast('Album art skipped: '+(e.message||'unknown'),'err');
+}
+}
+setUploadStatus('',null);
+toast('Uploaded '+audioName+(artName?' + '+artName:''),'ok');
+inp.value='';
+await Promise.all([loadFiles(),loadImages()]);
+}catch(e){
+setUploadStatus('',null);
+toast(e.message||'Upload failed','err');
+}finally{
+btn.disabled=false;
+}
+}
+
+function doImgUpload(url,file,progEl,statusEl,onDone){
 var xhr=new XMLHttpRequest();
 xhr.open('POST',url);
 xhr.upload.onprogress=function(e){
 if(e.lengthComputable){progEl.value=Math.round(100*e.loaded/e.total);}
 };
 xhr.onload=function(){
-progEl.value=0;
-progEl.style.display='none';
+progEl.value=0;progEl.style.display='none';statusEl.textContent='';
 try{
 var d=JSON.parse(xhr.responseText);
 if(d.ok){toast('Uploaded: '+d.filename,'ok');onDone();}
@@ -364,33 +646,27 @@ else{toast(d.error||'Upload failed','err');}
 }catch(e){toast('Upload failed','err');}
 };
 xhr.onerror=function(){
-progEl.value=0;
-progEl.style.display='none';
+progEl.value=0;progEl.style.display='none';statusEl.textContent='';
 toast('Upload failed','err');
 };
 var form=new FormData();
 form.append('file',file);
 progEl.style.display='block';
 progEl.value=0;
+statusEl.textContent='Uploading…';
 xhr.send(form);
 }
 
-document.getElementById('btn-upload-start').addEventListener('click',function(){
-var inp=document.getElementById('file-input');
-var f=inp.files[0];
-if(!f){toast('Please select a file first','err');return;}
-doUpload('/upload', f, document.getElementById('upload-progress'), function(){
-loadFiles().then(function(){inp.value='';});
-});
-});
+document.getElementById('btn-upload-start').addEventListener('click',handleAudioUpload);
 
 document.getElementById('btn-img-upload-start').addEventListener('click',function(){
 var inp=document.getElementById('img-file-input');
 var f=inp.files[0];
 if(!f){toast('Please select a file first','err');return;}
-doUpload('/upload-img', f, document.getElementById('upload-img-progress'), function(){
-loadImages().then(function(){inp.value='';});
-});
+doImgUpload('/upload-img', f,
+document.getElementById('upload-img-progress'),
+document.getElementById('upload-img-status'),
+function(){loadImages().then(function(){inp.value='';});});
 });
 
 (async function(){

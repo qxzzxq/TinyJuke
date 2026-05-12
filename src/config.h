@@ -71,7 +71,7 @@
 #endif
 
 // --- Version ---
-#define VERSION_STRING       "v1.2.0"
+#define VERSION_STRING       "v1.3.0"
 
 // --- Menu ---
 #define MENU_ITEM_COUNT      6
