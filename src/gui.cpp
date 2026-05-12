@@ -15,6 +15,7 @@ enum class Screen {
   SLEEPTIMER,
   VERSION,
   WEB,
+  REBOOT,
 };
 
 static Screen    scr       = Screen::MENU;
@@ -48,6 +49,9 @@ static void redraw() {
       break;
     case Screen::WEB:
       drawWebServerScreen(getWebConnectionCount());
+      break;
+    case Screen::REBOOT:
+      drawRebootConfirmScreen();
       break;
   }
 }
@@ -115,6 +119,12 @@ void guiLoop() {
         webRunning = false;
         scr = Screen::MENU; menuSel = 0;
         break;
+      case Screen::REBOOT:
+        // HOLD on the confirm screen = perform the reboot.
+        drawRebootingScreen();
+        delay(500);
+        ESP.restart();
+        return;  // not reached
     }
     redraw();
     return;
@@ -141,6 +151,7 @@ void guiLoop() {
           case 3: scr = Screen::POWERSAVING; break;
           case 4: scr = Screen::SLEEPTIMER; break;
           case 5: scr = Screen::VERSION; break;
+          case 6: scr = Screen::REBOOT; break;
         }
         redraw();
       }
@@ -298,6 +309,14 @@ void guiLoop() {
         stopWebServer();
         webRunning = false;
         scr = Screen::MENU; menuSel = 0;
+        redraw();
+      }
+      break;
+
+    // ================ REBOOT (HOLD is handled above and reboots; click/rotate cancels) ================
+    case Screen::REBOOT:
+      if (ev == ENC_CLICK || (ev != ENC_NONE && ev != ENC_HOLD)) {
+        scr = Screen::MENU; menuSel = 6;
         redraw();
       }
       break;

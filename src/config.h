@@ -71,10 +71,10 @@
 #endif
 
 // --- Version ---
-#define VERSION_STRING       "v1.3.0"
+#define VERSION_STRING       "v1.4.0"
 
 // --- Menu ---
-#define MENU_ITEM_COUNT      6
+#define MENU_ITEM_COUNT      7
 
 // --- Web server ---
 #define WIFI_SSID     "Jukebox-Setup"

@@ -299,7 +299,7 @@ void drawSDErrorScreen() {
 //  Menu screen
 // ================================================================
 
-static const char *MENU_ITEMS[] = { "Web Server", "Volume", "Brightness", "Power Saving", "Sleep Timer", "Version" };
+static const char *MENU_ITEMS[] = { "Web Server", "Volume", "Brightness", "Power Saving", "Sleep Timer", "Version", "Reboot" };
 
 void drawMenuScreen(int selected) {
   drawHeader("Menu", "");
@@ -675,6 +675,22 @@ void drawVersionScreen() {
   gfx.print(mode);
 
   drawHintBar("click or hold to return");
+}
+
+// ================================================================
+//  Reboot confirm / rebooting screens
+// ================================================================
+
+void drawRebootConfirmScreen() {
+  drawHeader("Reboot", "back");
+  centerText("Reboot?", 90, C_TEXT, 3);
+  centerText("Hold to confirm", 150, C_MUTED, 2);
+  drawHintBar("click to cancel \267 hold to reboot");
+}
+
+void drawRebootingScreen() {
+  gfx.fillScreen(C_BG);
+  centerText("Rebooting...", 150, C_ACCENT, 3);
 }
 
 // ================================================================
