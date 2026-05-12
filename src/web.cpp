@@ -542,7 +542,7 @@ canvas.width=300;canvas.height=300;
 var ctx=canvas.getContext('2d');
 ctx.imageSmoothingQuality='high';
 var sw=bmp.width,sh=bmp.height;
-var scale=Math.max(300/sw,300/sh);
+var scale=Math.min(300/sw,300/sh);
 var dw=sw*scale,dh=sh*scale;
 ctx.drawImage(bmp,(300-dw)/2,(300-dh)/2,dw,dh);
 var img=ctx.getImageData(0,0,300,300);
