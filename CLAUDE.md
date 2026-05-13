@@ -173,14 +173,22 @@ What's covered: `uidToStr`, `lookupTag`, `parseWavHeaderBuffer`, `parseWavMetaBu
 `main.cpp` `loop()` is a thin dispatcher: read inputs (encoder, NFC, audio flags) → call `jukeboxStep(state, input)` → execute the returned `Action`s (EnterSleep / WakeFromSleep / EnterMenu / TriggerPlayback / ConfirmTagRemoved). All decisions about *when* to sleep, *when* to trigger playback, and *when* to debounce a tag removal live in `jukebox_state.cpp`. The `TriggerPlayback` action invokes the (still-blocking) play loop, which mutates `s_state.tagPresent` / `s_state.lastActivityMs` directly when it exits so the next tick observes the new state. The GUI is handled externally — main.cpp short-circuits to `guiLoop()` while `guiActive()`.
 
 ## Dev workflow
-- create a new branch with appropriate name
-- make code changes.
 
-  **After every code change:**
-  1. **Verify it compiles** — run `~/.platformio/penv/bin/pio run` and fix any syntax or compile-time errors before considering the change complete. Never leave the project in a state that fails to build.
-  2. **Cross-validate docs** — check CLAUDE.md and README.md against the actual source files. Update any stale descriptions — pin maps, source file trees, architecture flows, status, constraints, SD card layout, and TODO lists. These documents are the source of truth for future agents and contributors; drift between docs and code compounds over time.
+1. **Create a branch** with a descriptive name (e.g., `feat/i2s-audio`, `fix/sd-mount-race`).
 
-- increment version
+2. **Make code changes.** After *every* change:
+   - **Verify it compiles.** Run `~/.platformio/penv/bin/pio run` and fix all syntax or compile-time errors before moving on. Never leave the project in a non-building state.
+   - **Cross-validate docs.** Reconcile `CLAUDE.md` and `README.md` against the actual source. Update anything stale — pin maps, source file tree, architecture/data flow, current status, constraints, SD card layout, and TODOs. These docs are the source of truth for future agents and contributors; drift compounds quickly.
+
+3. **Write tests** — unit tests for new logic, integration tests for cross-module behavior. Run the full suite locally.
+
+4. **Bump the version** (follow semver: patch for fixes, minor for features, major for breaking changes).
+
+5. **Commit and push** once all tests pass. Use clear, imperative commit messages (e.g., `Add I2S audio output via MAX98357A`).
+
+6. **Open a PR** with a summary of changes, testing notes, and links to any related issues.
+
+7. **Return to `main`** (`git checkout main && git pull`) once the PR is merged or handed off.
 
 ## Known constraints
 
