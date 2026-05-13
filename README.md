@@ -181,10 +181,3 @@ All fields except `file` are optional. `img` paths are relative to `/img/` on th
 ## Status
 
 Milestone 3 in progress. Implemented: web-based tag management, WAV + image upload, browser-side MP3/M4A/AAC/OGG/FLAC → WAV conversion with embedded-art extraction, runtime volume control, encoder-driven GUI with Brightness / Power Saving / Sleep Timer / Version screens, BMP album art (240×240, scaled in PSRAM), tag hot-swap detection, and amp-touch-noise mitigation via I2S priming.
-
-## TODO
-
-- Audio fade-out on track stop
-- "Unknown tag" audio chirp
-- Queue / crossfade between tracks
-
