@@ -12,6 +12,9 @@
 // ----------------------------------------------------------------
 
 static BluetoothA2DPSink a2dp_sink;
+// Linear volume control replaces the lib's default exponential curve so
+// BT loudness tracks the encoder linearly, matching the WAV playback path.
+static A2DPLinearVolumeControl linearVol;
 static PN532 *s_nfc = nullptr;
 
 static bool      s_running        = false;
@@ -105,14 +108,25 @@ static void onAudioStateChanged(esp_a2d_audio_state_t state, void *) {
 }
 
 // ----------------------------------------------------------------
-//  Stream reader — runs on the BT data path. We don't mutate the
-//  buffer (the library handles I2S output itself), but use it as a
-//  heartbeat for power-save and the sleep timer.
+//  Stream reader — heartbeat only. Volume scaling is delegated to the
+//  library's A2DPLinearVolumeControl, installed in initBluetoothMode.
 // ----------------------------------------------------------------
 
 static void onStreamData(const uint8_t * /*data*/, uint32_t len) {
   if (len == 0) return;
   s_lastFrameMs = millis();
+}
+
+// AVRCP "absolute volume" change pushed by the peer (e.g. user moves the
+// phone's BT slider). The lib reports the new value in the 0..127 range.
+static void onAvrcVolumeChange(int volume0_127) {
+  if (volume0_127 < 0) volume0_127 = 0;
+  if (volume0_127 > 127) volume0_127 = 127;
+  int newLocal = (volume0_127 * 100) / 127;
+  if (newLocal != volumeLevel) {
+    volumeLevel = newLocal;
+    s_lastVolumeSent = newLocal;   // suppress echo back via set_volume()
+  }
 }
 
 // ----------------------------------------------------------------
@@ -138,10 +152,12 @@ void initBluetoothMode(PN532 &nfc) {
   s_artist[0]     = '\0';
   s_peerName[0]   = '\0';
 
-  // Hand the I2S peripheral over to the BT stack.
+  // Hand the I2S peripheral over to the BT library; it installs and
+  // manages I2S internally (config + start + sample-rate negotiation).
   i2sDeinit();
+  // The lib's stream_reader (i2s_output=true) path will install I2S in
+  // start(); we don't need to prime it ourselves.
 
-  // Pin config (legacy i2s_pin_config_t) — matches our MAX98357A wiring.
   i2s_pin_config_t pins = {};
   pins.bck_io_num   = I2S_BCLK;
   pins.ws_io_num    = I2S_LRC;
@@ -149,16 +165,21 @@ void initBluetoothMode(PN532 &nfc) {
   pins.data_in_num  = I2S_PIN_NO_CHANGE;
   a2dp_sink.set_pin_config(pins);
 
-  a2dp_sink.set_stream_reader(onStreamData, false);
+  // Linear volume curve so loudness tracks the encoder 1:1 like WAV mode.
+  a2dp_sink.set_volume_control(&linearVol);
+
+  a2dp_sink.set_stream_reader(onStreamData, true);
   a2dp_sink.set_avrc_metadata_callback(onAvrcMetadata);
   a2dp_sink.set_on_connection_state_changed(onConnectionStateChanged);
   a2dp_sink.set_on_audio_state_changed(onAudioStateChanged);
+  a2dp_sink.set_avrc_rn_volumechange(onAvrcVolumeChange);
   a2dp_sink.set_auto_reconnect(false);
 
   a2dp_sink.start((char *)BT_DEVICE_NAME);
 
-  // Sync the initial software volume into the BT stack.
-  a2dp_sink.set_volume((uint8_t)volumeLevel);
+  // Push our current local volume to the library + peer (AVRCP notify).
+  uint8_t btVol = (uint8_t)((volumeLevel * 127) / 100);
+  a2dp_sink.set_volume(btVol);
   s_lastVolumeSent = volumeLevel;
 
   s_running = true;
@@ -166,8 +187,21 @@ void initBluetoothMode(PN532 &nfc) {
 
 void stopBluetoothMode() {
   if (!s_running) return;
-  a2dp_sink.end(true);   // releases I2S internally
-  i2sPrime();            // re-drive the amp pins to suppress touch noise
+
+  // Drop the peer first so the A2DP/AVRCP deinit chain sees a clean state.
+  // Without this, end() cascades "Failed to deinit avrc ct/tg/source" errors.
+  if (s_connected) {
+    a2dp_sink.disconnect();
+    delay(300);  // let the disconnect propagate through the BT stack
+  }
+
+  // end(false) tears down the stack but keeps the controller memory mapped
+  // so a later start() can succeed. end(true) releases controller memory
+  // and the library explicitly refuses restart after that.
+  a2dp_sink.end(false);
+  delay(100);
+
+  i2sPrime();            // re-drive amp pins to suppress touch noise
   s_running       = false;
   s_connected     = false;
   s_streamingNow  = false;
@@ -205,9 +239,11 @@ void handleBluetoothLoop() {
 
   uint32_t now = millis();
 
-  // 1) Volume sync — encoder may have changed `volumeLevel` from any screen.
+  // Encoder-driven volume change: push to library + AVRCP-notify the peer
+  // so the phone's BT volume slider stays in sync.
   if (volumeLevel != s_lastVolumeSent) {
-    a2dp_sink.set_volume((uint8_t)volumeLevel);
+    uint8_t btVol = (uint8_t)((volumeLevel * 127) / 100);
+    a2dp_sink.set_volume(btVol);
     s_lastVolumeSent = volumeLevel;
   }
 
