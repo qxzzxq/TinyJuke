@@ -81,7 +81,7 @@ The KY-040 module has built-in 10k pull-up resistors. GPIO 34 and 36 are input-o
 - **Click (short press)** — save volume (jukebox) or select/confirm (menu)
 - **Hold (long press, >600ms)** — enter management menu (jukebox) or go back (menu)
 
-The menu provides access to **Web Server**, **Volume**, **Brightness**, **Power Saving**, **Sleep Timer**, **Version** (firmware version + build mode), and **Reboot** (confirmation screen — hold the encoder to reboot, click or rotate to cancel). Brightness uses a white bar (same layout as volume) and is persisted to `/brightness.cfg`. Power Saving turns off the display after a configurable idle period (Off / 5 / 15 / 30 / 60 minutes; the 1-minute option only appears in `DEV_MODE` builds) and is persisted to `/powersave.cfg`. Sleep Timer stops audio playback after the configured duration (Off / 15 / 30 / 60 / 120 minutes; the 1-minute option only appears in `DEV_MODE` builds) and is persisted to `/sleeptimer.cfg`.
+The menu provides access to **Web Server**, **Bluetooth**, **Volume**, **Brightness**, **Power Saving**, **Sleep Timer**, **Version** (firmware version + build mode), and **Reboot** (confirmation screen — hold the encoder to reboot, click or rotate to cancel). Brightness uses a white bar (same layout as volume) and is persisted to `/brightness.cfg`. Power Saving turns off the display after a configurable idle period (Off / 5 / 15 / 30 / 60 minutes; the 1-minute option only appears in `DEV_MODE` builds) and is persisted to `/powersave.cfg`. Sleep Timer stops audio playback after the configured duration (Off / 15 / 30 / 60 / 120 minutes; the 1-minute option only appears in `DEV_MODE` builds) and is persisted to `/sleeptimer.cfg`.
 
 MAX98357A configuration pins:
 - **GAIN** — tie to GND for 12 dB and control volume in software. Leaving the pin floating is unreliable (high-impedance input, noise can produce random gain at power-up).
@@ -101,6 +101,19 @@ Each NFC tag UID maps to a single audio file on the SD card. When a tag is scann
 8. If a Sleep Timer is configured, an on-screen countdown is shown during playback and audio stops when the timer reaches zero (the tag must be removed/replaced before a new track will play).
 
 Unknown tags are displayed on screen for 10 seconds with their UID — click or hold the encoder to dismiss, or remove/replace the tag.
+
+## Bluetooth speaker mode
+
+Hold the encoder to enter the menu and select **Bluetooth**. The ESP32 starts an A2DP sink and advertises itself as `Jukebox` — pair from a phone and play music from any app. While in BT mode:
+
+- **Rotate** the encoder to adjust volume (saved to `/volume.cfg`)
+- **Hold** the encoder to stop Bluetooth and return to the menu
+- **Tap an RFID tag** — a prompt appears asking to switch to jukebox mode. Click the encoder to switch, hold to dismiss, or lift the tag to cancel.
+- AVRCP track title/artist are displayed when the phone reports them in printable ASCII; otherwise the screen falls back to "Bluetooth".
+- The configured **Sleep Timer** stops audio and exits BT mode when it fires (same one-shot semantics as WAV playback).
+- The **Power Saving** screen blank applies while the phone is paused; the display wakes on the next audio frame or encoder event.
+
+Bluetooth and the Web Server cannot run at the same time — the menu items are mutually exclusive.
 
 ## Web server & tag management
 
@@ -157,11 +170,14 @@ All fields except `file` are optional. `img` paths are relative to `/img/` on th
 - PN532 + PN532_HSU (bundled in `lib/`, `https://github.com/elechouse/PN532`) — NFC reader
 - `ArduinoJson` (bblanchon) — parsing `tags.json`
 - `Arduino_GFX` (moononournation) — TFT display driver (ST7789)
+- `ESP32-A2DP` (pschatzmann) — Bluetooth A2DP sink (BT speaker mode); built with `-DA2DP_LEGACY_I2S_SUPPORT=1` so it shares the legacy I2S driver path we use for WAV playback
 - WAV audio uses the ESP32's built-in I2S driver (no extra library needed)
 - SD (built-in, Arduino ESP32 framework) — SD card access via SPI
 - WiFi + WebServer (built-in, Arduino ESP32 framework) — AP mode + REST API
 
-**Pins** are defined in `src/config.h`. The code is split into modules under `src/`: `config.h`, `audio.cpp`, `wav_parser.cpp`, `screen.cpp`, `tags.cpp`, `tag_utils.cpp`, `encoder.cpp`, `encoder_gray.h`, `value_array.h`, `gui.cpp`, `web.cpp`, `main.cpp`.
+**Platform:** PlatformIO `espressif32` 7.x (via pioarduino), shipping arduino-esp32 3.x — required for `ledcAttach` and the 3.x `i2s_config_t` field names.
+
+**Pins** are defined in `src/config.h`. The code is split into modules under `src/`: `config.h`, `audio.cpp`, `wav_parser.cpp`, `screen.cpp`, `tags.cpp`, `tag_utils.cpp`, `encoder.cpp`, `encoder_gray.h`, `value_array.h`, `gui.cpp`, `web.cpp`, `bluetooth.cpp`, `main.cpp`.
 
 **Flash steps:**
 1. Format SD card as FAT32, copy `music/`, `img/` (optional), and `tags.json` to the root
@@ -180,4 +196,6 @@ All fields except `file` are optional. `img` paths are relative to `/img/` on th
 
 ## Status
 
-Milestone 3 in progress. Implemented: web-based tag management, WAV + image upload, browser-side MP3/M4A/AAC/OGG/FLAC → WAV conversion with embedded-art extraction, runtime volume control, encoder-driven GUI with Brightness / Power Saving / Sleep Timer / Version screens, BMP album art (240×240, scaled in PSRAM), tag hot-swap detection, and amp-touch-noise mitigation via I2S priming.
+Milestone 4 in progress. Added: Bluetooth A2DP sink (speaker) mode with AVRCP metadata display, encoder volume control, sleep-timer + power-save integration, and an RFID tag-detected prompt that hands off to jukebox playback.
+
+Prior milestones: web-based tag management, WAV + image upload, browser-side MP3/M4A/AAC/OGG/FLAC → WAV conversion with embedded-art extraction, runtime volume control, encoder-driven GUI with Brightness / Power Saving / Sleep Timer / Version screens, BMP album art (240×240, scaled in PSRAM), tag hot-swap detection, and amp-touch-noise mitigation via I2S priming.

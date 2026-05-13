@@ -23,6 +23,9 @@ void drawVersionScreen();
 void drawWebServerScreen(int connections);
 void drawRebootConfirmScreen();
 void drawRebootingScreen();
+void drawBluetoothScreen(bool connected, const char *peer,
+                         const char *title, const char *artist, int volume);
+void drawBluetoothTagPromptScreen();
 
 // Playback volume overlay — shown at bottom during audio playback
 void drawPlaybackVolumeOverlay(int level);

@@ -41,7 +41,7 @@ void i2sPrime() {
   i2sConfigured = true;
 }
 
-static void i2sDeinit() {
+void i2sDeinit() {
   if (i2sConfigured) {
     i2s_zero_dma_buffer(I2S_NUM_0);
     i2s_stop(I2S_NUM_0);
