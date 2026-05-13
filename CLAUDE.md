@@ -201,7 +201,11 @@ What's covered: `uidToStr`, `lookupTag`, `parseWavHeaderBuffer`, `parseWavMetaBu
 - **Heap is tight:** BMP loader allocates a raw image buffer (PSRAM preferred via `heap_caps_malloc(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)`, DRAM fallback) plus a 240×240×2 = 115 KB scaled buffer in `drawNowPlayingScreen`. Source BMPs up to 600×600 24-bit are accepted; larger or non-24-bit BMPs are rejected. `playWav()` allocates a 2 KB chunk buffer. Avoid additional large heap allocations; prefer stack or static buffers where possible.
 
 ## Other important remarks
-- **Code should be modularized** and testable.
-- If there are duplicated logic, turn it into a function.
+
+- **Keep code modular and testable.** Each module should have a single, clear responsibility and minimal coupling to others — favor pure functions and dependency injection over hidden state.
+- **Don't repeat yourself.** If the same logic appears in two or more places, extract it into a function (or class/module if it carries state). Apply the rule of three pragmatically: duplicating once is fine, twice is a smell, three times is a refactor.
+- **Prefer small functions over long ones.** If a function doesn't fit on one screen or needs comments to explain its sections, it's probably doing too much.
+- **Name things for what they do, not how.** `readSensor()` ages better than `readMAX98357AOverI2S()`; the latter leaks implementation details into every call site.
+
 - **Display artifacts on encoder adjustments** — in incremental update functions (updateVolumeDisplay, updateBrightnessDisplay, updatePowerSaveDisplay, updateSleepTimerDisplay), always clear the full text area before drawing the new value. Arduino_GFX `setCursor` positions the top-left of the character cell (NOT the baseline), so text at y=140 with size=3 occupies y=140..163 (24 px). The `fillRect` eraser must span from a few px above the text's y to a few px below y + 8*size. Use generous margins: for size=3 at y, clear from y-8 to y+30.
 - **visual feedback** is important: every interaction (rotating, clicking encoder, insert/remove tag) must have visual feedback.
