@@ -3,6 +3,7 @@
 #include "encoder.h"
 #include "web.h"
 #include "bluetooth.h"
+#include "timer_logic.h"
 
 // ----------------------------------------------------------------
 //  State
@@ -104,6 +105,16 @@ bool guiActive() {
 
 void guiLoop() {
   if (!active) return;
+
+  // Idle on the menu honours power-save: exit GUI so the main loop's FSM
+  // sees Waiting + no tag + elapsed idle and emits EnterSleep. Wake from
+  // sleep lands on the waiting screen via the existing FSM path.
+  if (scr == Screen::MENU &&
+      powerSaveShouldSleep(powerSaveMinutes, activityIdleMs())) {
+    drawWaitingScreen();
+    active = false;
+    return;
+  }
 
   // --- Continuous processing (runs regardless of encoder events) ---
 
