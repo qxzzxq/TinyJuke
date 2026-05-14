@@ -184,7 +184,17 @@ void initBluetoothMode(PN532 &nfc) {
   // from the phone's BT menu every time.
   a2dp_sink.set_auto_reconnect(true);
 
+#ifdef DEV_MODE
+  Serial.println("[BT] start() — auto_reconnect=true");
+#endif
   a2dp_sink.start((char *)BT_DEVICE_NAME);
+#ifdef DEV_MODE
+  esp_bd_addr_t *last = a2dp_sink.get_last_peer_address();
+  if (last) {
+    Serial.printf("[BT] last peer in NVS: %02X:%02X:%02X:%02X:%02X:%02X\n",
+      (*last)[0], (*last)[1], (*last)[2], (*last)[3], (*last)[4], (*last)[5]);
+  }
+#endif
 
   // Push our current local volume to the library + peer (AVRCP notify).
   uint8_t btVol = (uint8_t)((volumeLevel * 127) / 100);
@@ -214,6 +224,9 @@ void stopBluetoothMode() {
   // initBluetoothMode(). Flip to NoReconnect first so the NVS entry is
   // preserved; we re-enable AutoReconnect on the next start().
   a2dp_sink.set_auto_reconnect(false);
+#ifdef DEV_MODE
+  Serial.println("[BT] stopBluetoothMode: end(false), NVS preserved");
+#endif
   a2dp_sink.end(false);
   delay(100);
 
