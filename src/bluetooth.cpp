@@ -207,16 +207,16 @@ void initBluetoothMode(PN532 &nfc) {
 void stopBluetoothMode() {
   if (!s_running) return;
 
-  // Drop the peer first so the A2DP/AVRCP deinit chain sees a clean state.
-  // Without this, end() cascades "Failed to deinit avrc ct/tg/source" errors.
-  if (s_connected) {
-    a2dp_sink.disconnect();
-    delay(300);  // let the disconnect propagate through the BT stack
-  }
-
   // end(false) tears down the stack but keeps the controller memory mapped
   // so a later start() can succeed. end(true) releases controller memory
   // and the library explicitly refuses restart after that.
+  //
+  // end() handles the disconnect-and-wait loop internally (see
+  // BluetoothA2DPCommon::end — checks is_connected(), calls disconnect(),
+  // polls connection state). Doing our own disconnect() + delay() ahead of
+  // it raced with that loop and left BTC callbacks queued against
+  // already-deinit'd sink state, causing a LoadProhibited crash in
+  // btc_a2dp_cb_handler.
   //
   // Important: end() unconditionally calls clean_last_connection(), which
   // wipes the saved peer address from NVS *if* reconnect_status is still
