@@ -141,7 +141,12 @@ void guiLoop() {
     if (scr == Screen::BLUETOOTH) {
       bool needRedraw = btMetadataChanged() || btConnDrawn != btIsConnected();
       if (needRedraw) drawBluetoothCurrent();
-      else if (btVolDrawn != volumeLevel) drawBluetoothCurrent();  // simple full redraw
+      else if (btVolDrawn != volumeLevel) {
+        // Volume-only change (e.g. AVRCP push from the phone): redraw just
+        // the bottom bar to avoid full-screen flicker.
+        updateBluetoothVolume(volumeLevel);
+        btVolDrawn = volumeLevel;
+      }
     }
   }
 
@@ -415,8 +420,10 @@ void guiLoop() {
         ev = readEncoder();
         if (ev == ENC_NONE) break;
       }
-      if (volumeLevel != oldLevel)
-        drawBluetoothCurrent();  // simplest: full redraw with new volume bar
+      if (volumeLevel != oldLevel) {
+        updateBluetoothVolume(volumeLevel);
+        btVolDrawn = volumeLevel;
+      }
       break;
     }
 

@@ -34,6 +34,7 @@ static uint32_t  s_lastFrameMs    = 0;
 static uint32_t  s_streamStartMs  = 0;
 static bool      s_streamingNow   = false;
 static int       s_lastVolumeSent = -1;
+static uint32_t  s_lastPeerPollMs = 0;
 
 static bool      s_sleepFired     = false;
 
@@ -92,8 +93,12 @@ static void onConnectionStateChanged(esp_a2d_connection_state_t state, void *) {
     s_artist[0]   = '\0';
     s_streamingNow = false;
   } else {
+    // First-connect race: the controller often hasn't completed the Remote
+    // Name Request yet, so get_peer_name() returns empty. handleBluetoothLoop
+    // re-polls until the name shows up.
     const char *peer = a2dp_sink.get_peer_name();
     copyIfAscii(peer, s_peerName, sizeof(s_peerName));
+    s_lastPeerPollMs = 0;
   }
   if (wasConnected != s_connected) s_metadataDirty = true;
 }
@@ -148,6 +153,7 @@ void initBluetoothMode(PN532 &nfc) {
   s_streamStartMs = 0;
   s_lastFrameMs   = 0;
   s_lastVolumeSent = -1;
+  s_lastPeerPollMs = 0;
   s_title[0]      = '\0';
   s_artist[0]     = '\0';
   s_peerName[0]   = '\0';
@@ -173,7 +179,10 @@ void initBluetoothMode(PN532 &nfc) {
   a2dp_sink.set_on_connection_state_changed(onConnectionStateChanged);
   a2dp_sink.set_on_audio_state_changed(onAudioStateChanged);
   a2dp_sink.set_avrc_rn_volumechange(onAvrcVolumeChange);
-  a2dp_sink.set_auto_reconnect(false);
+  // Page the last-paired peer on start() so re-entering BT mode reconnects
+  // the phone automatically instead of forcing the user to pick the device
+  // from the phone's BT menu every time.
+  a2dp_sink.set_auto_reconnect(true);
 
   a2dp_sink.start((char *)BT_DEVICE_NAME);
 
@@ -198,6 +207,13 @@ void stopBluetoothMode() {
   // end(false) tears down the stack but keeps the controller memory mapped
   // so a later start() can succeed. end(true) releases controller memory
   // and the library explicitly refuses restart after that.
+  //
+  // Important: end() unconditionally calls clean_last_connection(), which
+  // wipes the saved peer address from NVS *if* reconnect_status is still
+  // AutoReconnect. That would defeat the auto-reconnect we want on the next
+  // initBluetoothMode(). Flip to NoReconnect first so the NVS entry is
+  // preserved; we re-enable AutoReconnect on the next start().
+  a2dp_sink.set_auto_reconnect(false);
   a2dp_sink.end(false);
   delay(100);
 
@@ -245,6 +261,18 @@ void handleBluetoothLoop() {
     uint8_t btVol = (uint8_t)((volumeLevel * 127) / 100);
     a2dp_sink.set_volume(btVol);
     s_lastVolumeSent = volumeLevel;
+  }
+
+  // Peer-name late arrival: poll get_peer_name() at ~500 ms cadence until
+  // we have one. iOS/Android often deliver the name a beat after the A2DP
+  // connection callback fires on first pairing.
+  if (s_connected && s_peerName[0] == '\0' && (now - s_lastPeerPollMs) >= 500) {
+    s_lastPeerPollMs = now;
+    const char *peer = a2dp_sink.get_peer_name();
+    if (peer && *peer) {
+      copyIfAscii(peer, s_peerName, sizeof(s_peerName));
+      if (s_peerName[0] != '\0') s_metadataDirty = true;
+    }
   }
 
   // 2) Power-save heartbeat — while audio is actively streaming, keep the

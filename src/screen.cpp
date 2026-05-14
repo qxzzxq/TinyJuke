@@ -470,8 +470,19 @@ void drawBluetoothScreen(bool connected, const char *peer,
     centerText("Bluetooth", 170, C_TEXT, 2);
   }
 
-  // Volume bar near the bottom
+  updateBluetoothVolume(volume);
+
+  drawHintBar("turn=vol \267 click=settings \267 hold=exit");
+}
+
+void updateBluetoothVolume(int volume) {
+  // Volume bar + labels live in a fixed band at the bottom of the BT screen.
+  // Repaint only this region on volume change to avoid full-screen flicker.
   const int barX = 24, barY = 240, barW = 192, barH = 16;
+  const int labelY = barY - 12;
+
+  // Clear the label strip (height of size-1 text = 8px) and the bar.
+  gfx.fillRect(barX, labelY, barW, 8, C_BG);
   gfx.fillRect(barX, barY, barW, barH, C_LINE);
   int fillW = (barW - 4) * volume / 100;
   if (fillW > 0)
@@ -479,14 +490,12 @@ void drawBluetoothScreen(bool connected, const char *peer,
 
   gfx.setTextColor(C_MUTED);
   gfx.setTextSize(1);
-  gfx.setCursor(barX, barY - 12);
+  gfx.setCursor(barX, labelY);
   gfx.print("VOL");
   char pct[8];
   snprintf(pct, sizeof(pct), "%d%%", volume);
-  gfx.setCursor(barX + barW - textWidth(pct), barY - 12);
+  gfx.setCursor(barX + barW - textWidth(pct), labelY);
   gfx.print(pct);
-
-  drawHintBar("turn=vol \267 click=settings \267 hold=exit");
 }
 
 void drawBluetoothTagPromptScreen() {
