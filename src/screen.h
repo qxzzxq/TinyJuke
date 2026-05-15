@@ -21,6 +21,8 @@ void drawPowerSaveScreen(int minutes);
 void drawSleepTimerScreen(int minutes);
 void drawVersionScreen();
 void drawWebServerScreen(int connections);
+void drawRebootConfirmScreen();
+void drawRebootingScreen();
 
 // Playback volume overlay — shown at bottom during audio playback
 void drawPlaybackVolumeOverlay(int level);
