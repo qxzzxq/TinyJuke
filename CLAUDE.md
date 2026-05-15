@@ -4,7 +4,9 @@
 
 RFID-driven audio player. Scan an NFC tag → lookup UID in `tags.json` on SD card → play the mapped WAV file through a MAX98357A I²S amplifier. Built on a Lolin D32 Pro (ESP32) with Arduino framework on PlatformIO. Display: ST7789V 240×320.
 
-**Status:** Milestone 3 in progress — tag hot-swap detection, brightness / power-save / sleep-timer settings persisted to SD, BMP album art (240×240, scaled in PSRAM), version screen, image upload, browser-side MP3/M4A/AAC/OGG/FLAC → WAV conversion with embedded-art extraction, and amp-touch-noise mitigation via I2S priming.
+**Status:** Milestone 4 in progress — Bluetooth A2DP sink mode reachable from the menu, with AVRCP metadata display (ASCII-only fallback to "Bluetooth"), encoder volume control via the ESP32-A2DP library's internal volume, sleep-timer + power-save integration, and an RFID tag-detected prompt that hands off to jukebox playback. WiFi (Web Server) and Bluetooth are mutually exclusive in the UI.
+
+Earlier (Milestone 3): tag hot-swap detection, brightness / power-save / sleep-timer settings persisted to SD, BMP album art (240×240, scaled in PSRAM), version screen, image upload, browser-side MP3/M4A/AAC/OGG/FLAC → WAV conversion with embedded-art extraction, and amp-touch-noise mitigation via I2S priming.
 
 ## Pin map
 
@@ -44,8 +46,8 @@ KY-040 encoder: CLK→GPIO36, DT→GPIO5, SW→GPIO34, +→3.3V, GND→GND. GPIO
 
 ```
 src/
-├── config.h          — Pin definitions, colors, D32 Pro macro fix, brightness/volume/sleep defaults
-├── audio.h/.cpp      — playWav(), stopPlayback(), parseWavMeta() (SD-backed thin wrappers around wav_parser)
+├── config.h          — Pin definitions, colors, D32 Pro macro fix, brightness/volume/sleep/BT defaults
+├── audio.h/.cpp      — playWav(), stopPlayback(), parseWavMeta(), i2sPrime()/i2sDeinit()
 ├── wav_parser.h/.cpp — Pure buffer-based WAV header + LIST/INFO metadata parsers (testable on native)
 ├── screen.h/.cpp     — TFT draw functions for 240×320 (extern gfx, uses C_ color constants)
 ├── tags.h            — TagInfo struct + declarations
@@ -56,8 +58,9 @@ src/
 ├── value_array.h     — Pure helpers for "fixed list of option values" lookups (power-save/sleep-timer)
 ├── timer_logic.h     — Pure timer policy: sleepTimerShouldFire / powerSaveShouldSleep / timerRemainingMs / formatCountdownMMSS
 ├── jukebox_state.h/.cpp — Pure top-level FSM (Waiting / Sleeping + sleepStopped / tagPresent flags) driving loop()'s decisions
-├── gui.h/.cpp        — Management mode (menu, volume, brightness, power saving, sleep timer, version, web server screens)
+├── gui.h/.cpp        — Management mode (menu + volume/brightness/powersave/sleeptimer/version/web/bluetooth screens)
 ├── web.h/.cpp        — WiFi AP, REST API, file upload, SPA HTML page
+├── bluetooth.h/.cpp  — A2DP sink wrapper: lifecycle, AVRCP metadata (ASCII-validated), NFC poll for tag-switch prompt, sleep-timer integration
 └── main.cpp          — Peripherals (bus, gfx, nfc), setup(), loop(), sleep/wake logic
 test/test_pure/       — Unity tests for pure logic; runs on host via `pio test -e native`
 platformio.ini        — PlatformIO project config + library dependencies (envs: release, debug, native)
@@ -72,11 +75,14 @@ README.md             — User-facing docs (wiring, build steps, SD layout)
 |------------------|-----------------------------------------------|----------------------|
 | Arduino_GFX      | `moononournation/Arduino_GFX.git`             | TFT display (ST7789) |
 | ArduinoJson      | `bblanchon/ArduinoJson @ ^7`                  | Parse `/tags.json`   |
+| ESP32-A2DP       | `pschatzmann/ESP32-A2DP.git`                  | Bluetooth A2DP sink  |
 | PN532 + PN532_HSU| Bundled in `lib/`                             | NFC reader           |
 | SD               | Built-in (Arduino ESP32 framework)            | SD card access       |
 | WiFi + WebServer | Built-in (Arduino ESP32 framework)            | AP mode + REST API   |
 
-WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, deprecated but functional). No external audio library is needed.
+WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, deprecated but functional). ESP32-A2DP is built with `-DA2DP_LEGACY_I2S_SUPPORT=1` so it uses the same legacy I2S path; `initBluetoothMode()` calls `i2sDeinit()` to release our driver before A2DP installs its own, and `stopBluetoothMode()` calls `i2sPrime()` afterward to restore amp pin drive.
+
+**Platform:** pinned to `pioarduino/platform-espressif32@54.03.20` (arduino-esp32 3.x). 3.x is required for `ledcAttach`, the renamed `i2s_config_t` fields (`dma_desc_num`/`dma_frame_num`), and an in-framework Bluetooth Classic + Bluedroid build.
 
 ## Encoder events
 
@@ -100,9 +106,9 @@ WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, d
 9. `loadPowerSave()` + `loadSleepTimer()` + `resetActivityTimer()` — load power save and audio sleep timeouts, init activity tracking
 
 **loop() state machine:**
-- Sleep check: if idle on waiting screen > `powerSaveMinutes`, enter sleep (display off, backlight off). When `sleepStopped` is set (sleep timer fired with tag still present), the tag is treated as absent for sleep purposes.
+- Sleep check: if idle on waiting screen > `powerSaveMinutes`, enter sleep (display off, backlight off). When `sleepStopped` is set (sleep timer fired with tag still present), the tag is treated as absent for sleep purposes. The menu screen also honours power-save: idling on `Screen::MENU` for `powerSaveMinutes` exits the GUI to the waiting screen, and the FSM's next tick enters sleep via the same path.
 - Sleep state: poll encoder + NFC for wake; on wake restore display and re-sync. NFC wake is suppressed while `sleepStopped` is true so the still-present tag doesn't immediately re-trigger.
-- Management mode active (`guiActive()`) → delegate to `guiLoop()` (menu, volume, brightness, power saving, sleep timer, version, web server, reboot). Menu items: **Web Server, Volume, Brightness, Power Saving, Sleep Timer, Version, Reboot**. Reboot shows a confirmation screen — hold = `ESP.restart()`, click/rotate = cancel back to menu.
+- Management mode active (`guiActive()`) → delegate to `guiLoop()` (menu, volume, brightness, power saving, sleep timer, version, web server, bluetooth, reboot). Menu items: **Web Server, Bluetooth, Volume, Brightness, Power Saving, Sleep Timer, Version, Reboot**. Reboot shows a confirmation screen — hold = `ESP.restart()`, click/rotate = cancel back to menu.
 - Jukebox mode: read encoder; HOLD enters menu (saves volume first). Rotation/click during playback are handled inside `playWav()`, not in the main loop.
 - `!tagPresent && found && !sleepStopped` → tag arrived: lookup UID → enter `while (tagPresent)` replay loop: draw now-playing, optionally draw sleep-timer countdown, run `playWav()`, then quick NFC re-poll. Same UID = replay; different UID = exit (next iteration handles new arrival); no tag (single miss in this quick check) = exit.
 - Sleep timer firing during playback sets `sleepTimerFired` → `sleepStopped`, breaks out of the replay loop and blocks re-trigger until the tag is physically removed.
@@ -198,6 +204,7 @@ What's covered: `uidToStr`, `lookupTag`, `parseWavHeaderBuffer`, `parseWavMetaBu
 - **Single audio track at a time:** No crossfade or queue. Tag swaps mid-playback are detected (in both `playWav()` and the main loop) — a different UID stops the current track and the new tag is picked up on the next loop iteration. The same tag left on the reader replays the track in a `while (tagPresent)` loop.
 - **WAV only:** Standard PCM WAV (16/24-bit, mono/stereo, any sample rate). No MP3/FLAC support.
 - **Web server uses AP mode:** `WIFI_SSID` / `WIFI_PASSWORD` from config.h. Exposes REST API: `/api/tags` (list), `/api/tag` (POST upsert / DELETE / OPTIONS), `/api/files`, `/api/images`, `/img?name=` (serve BMP), `/upload` (WAV multipart), `/upload-img` (image multipart). Serves a single-page web app at `/`. The SPA itself accepts WAV/MP3/M4A/AAC/OGG/FLAC for audio upload — non-WAV inputs are decoded via `AudioContext.decodeAudioData` and resampled to 44.1 kHz 16-bit mono via `OfflineAudioContext` entirely client-side, then uploaded as WAV. Embedded cover art (ID3v2 APIC, MP4 `covr`, FLAC PICTURE) is extracted in JS, centre-cropped to 300×300 24-bit BMP via a canvas, and uploaded to `/img/` with the same basename. The firmware-side `/upload` and `/upload-img` handlers remain WAV/BMP-only — no server-side decoding. Web server only runs while the GUI is on the WEB screen — leaving the WEB screen calls `stopWebServer()`.
+- **Bluetooth A2DP sink (`bluetooth.cpp`):** wraps `pschatzmann/ESP32-A2DP`. Menu CLICK on "Bluetooth" → `initBluetoothMode(nfc)` releases the legacy I2S driver, configures the same MAX98357A pins, registers AVRCP / connection / audio-state / stream callbacks, and calls `a2dp_sink.start("Jukebox")`. `handleBluetoothLoop()` runs every iteration on the BT screen: syncs `volumeLevel` into the A2DP stack via `set_volume`, resets the activity timer while streaming, checks `sleepTimerShouldFire(...)` (one-shot — clears `sleepTimerMinutes` and saves), and polls PN532 at ~300 ms cadence. Tag detection raises a modal prompt screen — click exits GUI (main loop's NFC poll picks up the still-present tag and triggers playback); hold dismisses; tag lift auto-dismisses. AVRCP `title`/`artist` are filtered through a printable-ASCII check (0x20..0x7E only) — anything outside falls back to "Bluetooth" to avoid encoding garbage on the 7-bit font. BT and WiFi (web server) are mutually exclusive in the menu UI.
 - **Heap is tight:** BMP loader allocates a raw image buffer (PSRAM preferred via `heap_caps_malloc(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)`, DRAM fallback) plus a 240×240×2 = 115 KB scaled buffer in `drawNowPlayingScreen`. Source BMPs up to 600×600 24-bit are accepted; larger or non-24-bit BMPs are rejected. `playWav()` allocates a 2 KB chunk buffer. Avoid additional large heap allocations; prefer stack or static buffers where possible.
 
 ## Other important remarks

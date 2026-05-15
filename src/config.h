@@ -74,11 +74,14 @@
 #define VERSION_STRING       "v1.4.0"
 
 // --- Menu ---
-#define MENU_ITEM_COUNT      7
+#define MENU_ITEM_COUNT      8
 
 // --- Web server ---
 #define WIFI_SSID     "Jukebox-Setup"
 #define WIFI_PASSWORD "12345678"
+
+// --- Bluetooth ---
+#define BT_DEVICE_NAME "Jukebox"
 
 // --- Colors (RGB565, dark modern theme) ---
 #define C_BG        0x0865   // #0A0E1A — very dark navy

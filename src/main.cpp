@@ -123,6 +123,10 @@ void resetActivityTimer() {
   s_state.lastActivityMs = millis();
 }
 
+uint32_t activityIdleMs() {
+  return millis() - s_state.lastActivityMs;
+}
+
 // Map raw encoder event integer to FSM-normalized EncEvent.
 static EncEvent normalizeEnc(int ev) {
   if (ev == ENC_NONE)  return EncEvent::None;

@@ -299,11 +299,12 @@ void drawSDErrorScreen() {
 //  Menu screen
 // ================================================================
 
-static const char *MENU_ITEMS[] = { "Web Server", "Volume", "Brightness", "Power Saving", "Sleep Timer", "Version", "Reboot" };
+static const char *MENU_ITEMS[] = { "Web Server", "Bluetooth", "Volume", "Brightness", "Power Saving", "Sleep Timer", "Version", "Reboot" };
 
 void drawMenuScreen(int selected) {
   drawHeader("Menu", "");
-  const int startY = 50, itemH = 34;
+  // 7 items at itemH=32 fit in startY=44..(44+7*32)=268, leaving room for the hint bar.
+  const int startY = 44, itemH = 32;
 
   for (int i = 0; i < MENU_ITEM_COUNT; i++) {
     int y = startY + i * itemH;
@@ -425,6 +426,88 @@ void updateWebConnectionCount(int connections) {
 }
 
 // ================================================================
+//  Bluetooth screen
+// ================================================================
+
+void drawBluetoothScreen(bool connected, const char *peer,
+                         const char *title, const char *artist, int volume) {
+  gfx.fillScreen(C_BG);
+  centerText("Bluetooth", 30, C_ACCENT, 3);
+
+  // Status line
+  if (!connected) {
+    centerText("Pair on your phone:", 90, C_MUTED, 2);
+    centerText(BT_DEVICE_NAME, 118, C_TEXT, 2);
+  } else {
+    centerText("Connected", 90, C_MUTED, 2);
+    if (peer && peer[0]) {
+      char buf[64];
+      int maxW = gfx.width() - 2 * marginForSize(2);
+      truncateToFit(peer, buf, sizeof(buf), maxW, 2);
+      centerText(buf, 118, C_TEXT, 2);
+    } else {
+      centerText(BT_DEVICE_NAME, 118, C_TEXT, 2);
+    }
+  }
+
+  // Track metadata block — title + artist, or fallback "Bluetooth"
+  bool haveTitle  = title  && title[0];
+  bool haveArtist = artist && artist[0];
+  if (haveTitle || haveArtist) {
+    if (haveTitle) {
+      char buf[64];
+      int maxW = gfx.width() - 2 * marginForSize(2);
+      truncateToFit(title, buf, sizeof(buf), maxW, 2);
+      centerText(buf, 170, C_TEXT, 2);
+    }
+    if (haveArtist) {
+      char buf[64];
+      int maxW = gfx.width() - 2 * marginForSize(1);
+      truncateToFit(artist, buf, sizeof(buf), maxW, 1);
+      centerText(buf, 196, C_MUTED, 1);
+    }
+  } else {
+    centerText("Bluetooth", 170, C_TEXT, 2);
+  }
+
+  updateBluetoothVolume(volume);
+
+  drawHintBar("turn=vol \267 click=settings \267 hold=exit");
+}
+
+void updateBluetoothVolume(int volume) {
+  // Volume bar + labels live in a fixed band at the bottom of the BT screen.
+  // Repaint only this region on volume change to avoid full-screen flicker.
+  const int barX = 24, barY = 240, barW = 192, barH = 16;
+  const int labelY = barY - 12;
+
+  // Clear the label strip (height of size-1 text = 8px) and the bar.
+  gfx.fillRect(barX, labelY, barW, 8, C_BG);
+  gfx.fillRect(barX, barY, barW, barH, C_LINE);
+  int fillW = (barW - 4) * volume / 100;
+  if (fillW > 0)
+    gfx.fillRect(barX + 2, barY + 2, fillW, barH - 4, C_ACCENT);
+
+  gfx.setTextColor(C_MUTED);
+  gfx.setTextSize(1);
+  gfx.setCursor(barX, labelY);
+  gfx.print("VOL");
+  char pct[8];
+  snprintf(pct, sizeof(pct), "%d%%", volume);
+  gfx.setCursor(barX + barW - textWidth(pct), labelY);
+  gfx.print(pct);
+}
+
+void drawBluetoothTagPromptScreen() {
+  gfx.fillScreen(C_BG);
+  centerText("Tag detected", 70, C_ACCENT, 3);
+  centerText("Switch to", 140, C_TEXT, 2);
+  centerText("jukebox mode?", 168, C_TEXT, 2);
+  centerText("click to switch", 220, C_ACCENT, 2);
+  drawHintBar("hold or lift tag to dismiss");
+}
+
+// ================================================================
 //  Playback volume overlay — replaces the bottom text section (y=240–319)
 //  during playback. Uses incremental updates to avoid flicker.
 //  On clear, the bottom section is redrawn from saved state.
@@ -485,7 +568,7 @@ void clearPlaybackVolumeOverlay() {
 // ================================================================
 
 void updateMenuSelection(int oldSel, int newSel) {
-  const int startY = 50, itemH = 34;
+  const int startY = 44, itemH = 32;
 
   // Deselect old
   int yo = startY + oldSel * itemH;

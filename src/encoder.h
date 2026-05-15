@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 #include "config.h"
 
 // readEncoder() return values:
@@ -34,3 +36,4 @@ void saveSleepTimer();   // persist sleepTimerMinutes to SD card
 int  sleepTimerToIndex(int minutes);    // convert minutes to option index (0-4)
 int  sleepTimerToMinutes(int index);    // convert option index to minutes
 void resetActivityTimer(); // reset idle timer (called on user interaction)
+uint32_t activityIdleMs(); // milliseconds since last user interaction
