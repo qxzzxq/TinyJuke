@@ -42,4 +42,5 @@ void updateBrightnessDisplay(int level);
 void updatePowerSaveDisplay(int minutes);
 void updateSleepTimerDisplay(int minutes);
 void updateWebConnectionCount(int connections);
+void drawWebWriteProgress(int pct);  // metadata rewrite progress on web screen; pct<0 clears
 void updateBluetoothVolume(int volume);
