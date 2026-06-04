@@ -3,6 +3,7 @@
 #include "encoder.h"
 #include "audio.h"
 #include "timer_logic.h"
+#include "web.h"  // getWebPin() for the web server screen
 #include <SD.h>
 #include <esp_heap_caps.h>
 
@@ -406,9 +407,9 @@ void drawWebServerScreen(int connections) {
   centerText(conn, y, C_TEXT, 2);
 
   y += 30;
-  gfx.setTextColor(C_MUTED);
-  gfx.setTextSize(2);
-  gfx.setCursor(12, y); gfx.print("Open in browser to manage tags");
+  char pinLine[24];
+  snprintf(pinLine, sizeof(pinLine), "Update PIN: %s", getWebPin());
+  centerText(pinLine, y, C_MUTED, 2);
 
   drawHintBar("click to stop server");
   s_webDrawn = connections;

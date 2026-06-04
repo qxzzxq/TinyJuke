@@ -72,6 +72,8 @@ h1{font-size:22px;color:#4ADE80;font-weight:700}
 #upload-status,#upload-img-status,#fw-status{font-size:12px;color:#6B7B8D;margin-top:8px;min-height:14px}
 #btn-upload-start:disabled,#btn-img-upload-start:disabled,#btn-fw-install:disabled{opacity:.5;cursor:default}
 #btn-fw-install{padding:8px 18px;border-radius:6px;border:none;cursor:pointer;font-size:14px;font-weight:500;background:#4ADE80;color:#0A0E1A}
+#fw-pin{padding:8px 10px;border:1px solid #1E293B;border-radius:6px;background:#0A0E1A;color:#eee;font-size:14px;width:100px}
+#fw-pin:focus{outline:none;border-color:#4ADE80}
 
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:100;padding:16px}
 .modal-box{background:#111A2E;border-radius:12px;width:100%;max-width:420px;max-height:90vh;overflow-y:auto;border:1px solid #1E293B;animation:modalIn .2s ease}
@@ -145,6 +147,8 @@ h1{font-size:22px;color:#4ADE80;font-weight:700}
 <div style="font-size:14px;margin-bottom:12px">Firmware: <span id="fw-version" style="color:#4ADE80">&hellip;</span></div>
 <label>Upload a firmware image (.bin built with the matching partition table). The device installs it to the inactive slot and reboots when done.</label>
 <input type="file" id="fw-input" accept=".bin">
+<label>Update PIN (shown on the device screen)</label>
+<input id="fw-pin" inputmode="numeric" maxlength="4" placeholder="0000" autocomplete="off">
 <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
 <button id="btn-fw-install">Install &amp; Reboot</button>
 </div>
@@ -255,6 +259,8 @@ var inp=document.getElementById('fw-input');
 var f=inp.files[0];
 if(!f){toast('Please select a .bin file first','err');return;}
 if(!/\.bin$/i.test(f.name)){toast('Not a .bin file','err');return;}
+var pin=document.getElementById('fw-pin').value.trim();
+if(!/^\d{4}$/.test(pin)){toast('Enter the 4-digit PIN from the device screen','err');return;}
 if(!confirm('Install '+f.name+' ('+formatSize(f.size)+')?\n\nThe device reboots when done; restart the Web Server from the device menu to reconnect.'))return;
 var btn=document.getElementById('btn-fw-install');
 var st=document.getElementById('fw-status');
@@ -263,7 +269,7 @@ btn.disabled=true;
 pr.style.display='block';pr.value=0;
 st.textContent='Uploading firmware…';
 try{
-await uploadBlob('/update?size='+f.size,f,f.name,function(p){pr.value=p;});
+await uploadBlob('/update?size='+f.size+'&pin='+encodeURIComponent(pin),f,f.name,function(p){pr.value=p;});
 st.textContent='Installed. Device is rebooting — start the Web Server from the device menu to reconnect.';
 toast('Firmware installed','ok');
 }catch(e){
@@ -1480,6 +1486,15 @@ static size_t s_updateExpected = 0;
 static int    s_updateLastPct = -1;
 static const char *s_updateError = nullptr;
 
+// Per-session PIN shown on the device's web screen — proves physical
+// presence before accepting a firmware image (the AP password alone is
+// not enough to flash the device).
+static char s_webPin[5] = "";
+
+const char *getWebPin() {
+  return s_webPin;
+}
+
 static void handleFwUpdate() {
   HTTPUpload &up = server.upload();
 
@@ -1487,6 +1502,12 @@ static void handleFwUpdate() {
     s_updateOK = false;
     s_updateError = nullptr;
     s_updateLastPct = -1;
+    s_updateExpected = 0;
+    if (server.arg("pin") != s_webPin) {
+      Serial.println("[ota] ERROR: invalid PIN");
+      s_updateError = "Invalid PIN (shown on the device screen)";
+      return;  // Update never begins; WRITE/END stay no-ops
+    }
     s_updateExpected = (size_t)server.arg("size").toInt();  // exact .bin size from the SPA
     size_t target = s_updateExpected ? s_updateExpected : UPDATE_SIZE_UNKNOWN;
     Serial.printf("[ota] start '%s' (%u bytes)\n", up.filename.c_str(), (unsigned)s_updateExpected);
@@ -1509,7 +1530,9 @@ static void handleFwUpdate() {
     // end(true) would finalize a short upload by shrinking the expected
     // size to whatever arrived — require the exact byte count instead so
     // a truncated image is never marked successful.
-    if (s_updateExpected && Update.progress() != s_updateExpected) {
+    if (!Update.isRunning()) {
+      // begin() never ran (bad PIN / begin failure) — error already recorded
+    } else if (s_updateExpected && Update.progress() != s_updateExpected) {
       Serial.printf("[ota] ERROR: incomplete upload (%u/%u bytes)\n",
                     (unsigned)Update.progress(), (unsigned)s_updateExpected);
       s_updateError = "Incomplete upload";
@@ -1742,6 +1765,9 @@ void initWebServer() {
   }
   Serial.printf("AP %s, IP: %s\n", apOk ? "up" : "FAILED",
                 WiFi.softAPIP().toString().c_str());
+
+  // Fresh update PIN per web-server session.
+  snprintf(s_webPin, sizeof(s_webPin), "%04u", (unsigned)(esp_random() % 10000));
 
   // Register routes once — server.on() appends to the handler list, so
   // re-registering on every start/stop cycle leaks heap.
