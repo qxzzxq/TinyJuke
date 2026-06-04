@@ -427,7 +427,7 @@ void updateWebConnectionCount(int connections) {
 }
 
 // Long-operation progress (metadata rewrite, firmware update) — free band
-// (y=230..280) between the "Open in browser" hint and the hint bar.
+// (y=230..280) between the update-PIN line and the hint bar.
 // pct<0 clears the area.
 void drawWebProgress(const char *label, int pct) {
   if (pct < 0) {

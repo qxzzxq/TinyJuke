@@ -1488,8 +1488,13 @@ static const char *s_updateError = nullptr;
 
 // Per-session PIN shown on the device's web screen — proves physical
 // presence before accepting a firmware image (the AP password alone is
-// not enough to flash the device).
-static char s_webPin[5] = "";
+// not enough to flash the device). After PIN_MAX_FAILURES wrong guesses
+// the endpoint locks for the rest of the session (counter and PIN reset
+// when the web server is restarted from the device), so the 10,000-PIN
+// space cannot be brute-forced online.
+#define PIN_MAX_FAILURES 5
+static char    s_webPin[5] = "";
+static uint8_t s_pinFailures = 0;
 
 const char *getWebPin() {
   return s_webPin;
@@ -1503,16 +1508,31 @@ static void handleFwUpdate() {
     s_updateError = nullptr;
     s_updateLastPct = -1;
     s_updateExpected = 0;
-    if (server.arg("pin") != s_webPin) {
-      Serial.println("[ota] ERROR: invalid PIN");
-      s_updateError = "Invalid PIN (shown on the device screen)";
+    if (s_pinFailures >= PIN_MAX_FAILURES) {
+      Serial.println("[ota] ERROR: PIN locked out");
+      s_updateError = "Too many failed PINs - restart the web server on the device";
       return;  // Update never begins; WRITE/END stay no-ops
     }
-    s_updateExpected = (size_t)server.arg("size").toInt();  // exact .bin size from the SPA
-    size_t target = s_updateExpected ? s_updateExpected : UPDATE_SIZE_UNKNOWN;
+    if (server.arg("pin") != s_webPin) {
+      s_pinFailures++;
+      Serial.printf("[ota] ERROR: invalid PIN (attempt %u/%u)\n",
+                    (unsigned)s_pinFailures, (unsigned)PIN_MAX_FAILURES);
+      s_updateError = "Invalid PIN (shown on the device screen)";
+      return;
+    }
+    s_pinFailures = 0;
+    long sizeArg = server.arg("size").toInt();
+    if (sizeArg <= 0) {
+      // Without the exact size, a truncated upload could not be detected.
+      Serial.println("[ota] ERROR: missing/invalid size parameter");
+      s_updateError = "Missing or invalid size parameter";
+      return;
+    }
+    s_updateExpected = (size_t)sizeArg;
     Serial.printf("[ota] start '%s' (%u bytes)\n", up.filename.c_str(), (unsigned)s_updateExpected);
-    if (!Update.begin(target)) {
-      Serial.printf("[ota] ERROR: begin failed: %s\n", Update.errorString());
+    if (!Update.begin(s_updateExpected)) {
+      s_updateError = Update.errorString();
+      Serial.printf("[ota] ERROR: begin failed: %s\n", s_updateError);
     } else {
       drawWebProgress("Installing", 0);
     }
@@ -1527,17 +1547,17 @@ static void handleFwUpdate() {
       }
     }
   } else if (up.status == UPLOAD_FILE_END) {
-    // end(true) would finalize a short upload by shrinking the expected
-    // size to whatever arrived — require the exact byte count instead so
-    // a truncated image is never marked successful.
+    // Require the exact declared byte count — end(true) would finalize a
+    // short upload by shrinking the expected size to whatever arrived.
     if (!Update.isRunning()) {
-      // begin() never ran (bad PIN / begin failure) — error already recorded
-    } else if (s_updateExpected && Update.progress() != s_updateExpected) {
+      // begin() never ran (lockout / bad PIN / bad size / begin failure)
+      // or a write aborted — error already recorded.
+    } else if (Update.progress() != s_updateExpected) {
       Serial.printf("[ota] ERROR: incomplete upload (%u/%u bytes)\n",
                     (unsigned)Update.progress(), (unsigned)s_updateExpected);
       s_updateError = "Incomplete upload";
       Update.abort();
-    } else if (Update.isRunning() && Update.end(s_updateExpected == 0)) {
+    } else if (Update.end(false)) {  // isFinished() holds; full verification
       s_updateOK = true;
       Serial.printf("[ota] success, %u bytes — rebooting\n", (unsigned)up.totalSize);
     } else {
@@ -1766,8 +1786,10 @@ void initWebServer() {
   Serial.printf("AP %s, IP: %s\n", apOk ? "up" : "FAILED",
                 WiFi.softAPIP().toString().c_str());
 
-  // Fresh update PIN per web-server session.
+  // Fresh update PIN per web-server session; failed-attempt lockout resets
+  // with it (restarting the server requires physical access to the device).
   snprintf(s_webPin, sizeof(s_webPin), "%04u", (unsigned)(esp_random() % 10000));
+  s_pinFailures = 0;
 
   // Register routes once — server.on() appends to the handler list, so
   // re-registering on every start/stop cycle leaks heap.
