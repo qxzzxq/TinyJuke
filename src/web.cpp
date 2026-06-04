@@ -1485,6 +1485,7 @@ static bool   s_updateOK = false;
 static size_t s_updateExpected = 0;
 static int    s_updateLastPct = -1;
 static const char *s_updateError = nullptr;
+static int    s_updateErrCode = 500;  // 4xx for client errors (PIN/size), 500 for OTA failures
 
 // Per-session PIN shown on the device's web screen — proves physical
 // presence before accepting a firmware image (the AP password alone is
@@ -1506,11 +1507,13 @@ static void handleFwUpdate() {
   if (up.status == UPLOAD_FILE_START) {
     s_updateOK = false;
     s_updateError = nullptr;
+    s_updateErrCode = 500;
     s_updateLastPct = -1;
     s_updateExpected = 0;
     if (s_pinFailures >= PIN_MAX_FAILURES) {
       Serial.println("[ota] ERROR: PIN locked out");
       s_updateError = "Too many failed PINs - restart the web server on the device";
+      s_updateErrCode = 429;
       return;  // Update never begins; WRITE/END stay no-ops
     }
     if (server.arg("pin") != s_webPin) {
@@ -1518,6 +1521,7 @@ static void handleFwUpdate() {
       Serial.printf("[ota] ERROR: invalid PIN (attempt %u/%u)\n",
                     (unsigned)s_pinFailures, (unsigned)PIN_MAX_FAILURES);
       s_updateError = "Invalid PIN (shown on the device screen)";
+      s_updateErrCode = 403;
       return;
     }
     s_pinFailures = 0;
@@ -1526,6 +1530,7 @@ static void handleFwUpdate() {
       // Without the exact size, a truncated upload could not be detected.
       Serial.println("[ota] ERROR: missing/invalid size parameter");
       s_updateError = "Missing or invalid size parameter";
+      s_updateErrCode = 400;
       return;
     }
     s_updateExpected = (size_t)sizeArg;
@@ -1539,7 +1544,9 @@ static void handleFwUpdate() {
   } else if (up.status == UPLOAD_FILE_WRITE) {
     if (Update.isRunning()) {
       if (Update.write(up.buf, up.currentSize) != up.currentSize) {
-        Serial.printf("[ota] ERROR: write failed: %s\n", Update.errorString());
+        // Capture the real failure before abort() overwrites it with "Aborted".
+        s_updateError = Update.errorString();
+        Serial.printf("[ota] ERROR: write failed: %s\n", s_updateError);
         Update.abort();
       } else if (s_updateExpected) {
         int pct = (int)(Update.progress() * 100 / s_updateExpected);
@@ -1556,6 +1563,7 @@ static void handleFwUpdate() {
       Serial.printf("[ota] ERROR: incomplete upload (%u/%u bytes)\n",
                     (unsigned)Update.progress(), (unsigned)s_updateExpected);
       s_updateError = "Incomplete upload";
+      s_updateErrCode = 400;
       Update.abort();
     } else if (Update.end(false)) {  // isFinished() holds; full verification
       s_updateOK = true;
@@ -1577,7 +1585,7 @@ static void handleFwUpdateComplete() {
     delay(750);  // let the response flush before the connection dies
     ESP.restart();
   } else {
-    sendError(500, s_updateError ? s_updateError : Update.errorString());
+    sendError(s_updateErrCode, s_updateError ? s_updateError : Update.errorString());
   }
 }
 
