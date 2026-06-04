@@ -44,7 +44,15 @@ bool sdReady = false;
 // gate on sdReady themselves.
 static void initSDAndLoadTags() {
   Serial.print("Mounting SD... ");
-  if (!SD.begin(SD_CS)) {
+  // SD.begin defaults to a 4 MHz SPI clock (~500 KB/s ceiling) — a
+  // streaming bottleneck. The shared VSPI bus already runs the TFT much
+  // faster; mount at 20 MHz (SD SPI-mode spec max is 25) and fall back
+  // to the conservative default if the card won't mount.
+  if (SD.begin(SD_CS, SPI, 20000000)) {
+    Serial.print("(20MHz) ");
+  } else if (SD.begin(SD_CS)) {
+    Serial.print("(4MHz fallback) ");
+  } else {
     sdReady = false;
     Serial.println("FAILED");
     return;

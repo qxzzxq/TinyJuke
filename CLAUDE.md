@@ -96,7 +96,7 @@ WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, d
 
 **setup() flow:**
 1. LEDC attach + backlight off, then TFT init (`gfx.begin()` — initializes VSPI via bare-metal SPI). Backlight is held at 0 during boot draw to suppress power-on noise.
-2. SD mount (`SD.begin(4)`, reads `/tags.json` into `JsonDocument tagDoc`)
+2. SD mount (`SD.begin(SD_CS, SPI, 20000000)` — 20 MHz, with a 4 MHz fallback if the card won't mount; reads `/tags.json` into `JsonDocument tagDoc`)
 3. Boot screen on TFT (SD error or waiting screen), then turn backlight on (`ledcWrite(TFT_BL, 255)`).
 4. `i2sPrime()` — install I2S driver with a default config so BCLK/LRC/DOUT are actively driven; otherwise the MAX98357A picks up touch-coupled noise.
 5. PN532 init with firmware version check + raw-byte diagnostic on failure (currently `while(true) delay(1000)` on failure — known unrecoverable hang).
