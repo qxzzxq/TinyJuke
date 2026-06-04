@@ -1572,7 +1572,10 @@ static void handleUploadComplete() {
 // ================================================================
 
 static void handleRoot() {
-  server.send(200, "text/html", PAGE_HTML);
+  // send_P streams from flash in chunks — the plain send(const char*)
+  // overload copies the whole ~31 KB page into a heap String and serves
+  // an empty page when that allocation fails.
+  server.send_P(200, "text/html", PAGE_HTML, sizeof(PAGE_HTML) - 1);
 }
 
 // ================================================================
@@ -1591,27 +1594,43 @@ static void handleOptions() {
 // ================================================================
 
 void initWebServer() {
-  Serial.println("Starting web server...");
-  WiFi.softAP(WIFI_SSID, WIFI_PASSWORD);
-  Serial.print("AP IP: ");
-  Serial.println(WiFi.softAPIP());
+  Serial.printf("Starting web server... (heap %u, largest block %u)\n",
+                (unsigned)ESP.getFreeHeap(),
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+  WiFi.mode(WIFI_AP);
+  bool apOk = WiFi.softAP(WIFI_SSID, WIFI_PASSWORD);
+  if (!apOk) {
+    Serial.println("[web] softAP failed, retrying once...");
+    WiFi.mode(WIFI_OFF);
+    delay(250);
+    WiFi.mode(WIFI_AP);
+    apOk = WiFi.softAP(WIFI_SSID, WIFI_PASSWORD);
+  }
+  Serial.printf("AP %s, IP: %s\n", apOk ? "up" : "FAILED",
+                WiFi.softAPIP().toString().c_str());
 
-  server.on("/",             HTTP_GET,    handleRoot);
-  server.on("/api/tags",     HTTP_GET,    handleApiTags);
-  server.on("/api/files",    HTTP_GET,    handleApiFiles);
-  server.on("/api/images",   HTTP_GET,    handleApiImages);
-  server.on("/api/tag",      HTTP_POST,   handleApiTagPost);
-  server.on("/api/tag",      HTTP_DELETE, handleApiTagDelete);
-  server.on("/api/tag",      HTTP_OPTIONS, handleOptions);
-  server.on("/api/music",    HTTP_GET,    handleApiMusic);
-  server.on("/api/music",    HTTP_OPTIONS, handleOptions);
-  server.on("/api/file/meta", HTTP_POST,   handleApiFileMetaPost);
-  server.on("/api/file/meta", HTTP_OPTIONS, handleOptions);
-  server.on("/api/file",     HTTP_DELETE, handleApiFileDelete);
-  server.on("/api/file",     HTTP_OPTIONS, handleOptions);
-  server.on("/img",          HTTP_GET,    handleImg);
-  server.on("/upload",       HTTP_POST,   handleUploadComplete, handleUpload);
-server.on("/upload-img",   HTTP_POST,   handleUploadImgComplete, handleUploadImg);
+  // Register routes once — server.on() appends to the handler list, so
+  // re-registering on every start/stop cycle leaks heap.
+  static bool s_routesRegistered = false;
+  if (!s_routesRegistered) {
+    s_routesRegistered = true;
+    server.on("/",             HTTP_GET,    handleRoot);
+    server.on("/api/tags",     HTTP_GET,    handleApiTags);
+    server.on("/api/files",    HTTP_GET,    handleApiFiles);
+    server.on("/api/images",   HTTP_GET,    handleApiImages);
+    server.on("/api/tag",      HTTP_POST,   handleApiTagPost);
+    server.on("/api/tag",      HTTP_DELETE, handleApiTagDelete);
+    server.on("/api/tag",      HTTP_OPTIONS, handleOptions);
+    server.on("/api/music",    HTTP_GET,    handleApiMusic);
+    server.on("/api/music",    HTTP_OPTIONS, handleOptions);
+    server.on("/api/file/meta", HTTP_POST,   handleApiFileMetaPost);
+    server.on("/api/file/meta", HTTP_OPTIONS, handleOptions);
+    server.on("/api/file",     HTTP_DELETE, handleApiFileDelete);
+    server.on("/api/file",     HTTP_OPTIONS, handleOptions);
+    server.on("/img",          HTTP_GET,    handleImg);
+    server.on("/upload",       HTTP_POST,   handleUploadComplete, handleUpload);
+    server.on("/upload-img",   HTTP_POST,   handleUploadImgComplete, handleUploadImg);
+  }
 
   server.begin();
   Serial.println("Web server started.");
@@ -1620,8 +1639,14 @@ server.on("/upload-img",   HTTP_POST,   handleUploadImgComplete, handleUploadImg
 void stopWebServer() {
   Serial.println("Stopping web server...");
   server.stop();
-  WiFi.softAPdisconnect(true);
-  Serial.println("Web server stopped.");
+  // Single ordered teardown: drop AP without flipping the mode inside
+  // softAPdisconnect (the combined transition races the WiFi stop state —
+  // "netstack cb reg failed with 12308" / ESP_ERR_WIFI_STOP_STATE).
+  WiFi.softAPdisconnect(false);
+  WiFi.mode(WIFI_OFF);
+  Serial.printf("Web server stopped. (heap %u, largest block %u)\n",
+                (unsigned)ESP.getFreeHeap(),
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 }
 
 void handleWebClient() {
