@@ -1491,7 +1491,7 @@ static void handleFwUpdate() {
     if (!Update.begin(target)) {
       Serial.printf("[ota] ERROR: begin failed: %s\n", Update.errorString());
     } else {
-      drawWebProgress("Installing update", 0);
+      drawWebProgress("Installing", 0);
     }
   } else if (up.status == UPLOAD_FILE_WRITE) {
     if (Update.isRunning()) {
@@ -1500,7 +1500,7 @@ static void handleFwUpdate() {
         Update.abort();
       } else if (s_updateExpected) {
         int pct = (int)(Update.progress() * 100 / s_updateExpected);
-        if (pct != s_updateLastPct) { drawWebProgress("Installing update", pct); s_updateLastPct = pct; }
+        if (pct != s_updateLastPct) { drawWebProgress("Installing", pct); s_updateLastPct = pct; }
       }
     }
   } else if (up.status == UPLOAD_FILE_END) {
