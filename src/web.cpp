@@ -6,6 +6,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <SD.h>
+#include <Update.h>
 #include <esp_heap_caps.h>
 
 static WebServer server(80);
@@ -63,12 +64,16 @@ h1{font-size:22px;color:#4ADE80;font-weight:700}
 #btn-upload{background:#111A2E;color:#eee;border:1px solid #1E293B}
 #btn-upload:hover{background:#1E293B}
 
-#upload-panel,#upload-img-panel{display:none;margin-top:16px;padding:16px;background:#111A2E;border-radius:10px;border:1px solid #1E293B}
-#upload-panel label,#upload-img-panel label{font-size:13px;color:#6B7B8D;display:block;margin-bottom:8px}
-#upload-panel input[type=file],#upload-img-panel input[type=file]{color:#eee;margin-bottom:8px;width:100%}
-#upload-progress,#upload-img-progress{width:100%;height:6px;display:none;accent-color:#4ADE80}
-#upload-status,#upload-img-status{font-size:12px;color:#6B7B8D;margin-top:8px;min-height:14px}
-#btn-upload-start:disabled,#btn-img-upload-start:disabled{opacity:.5;cursor:default}
+#upload-panel,#upload-img-panel,#fw-panel{display:none;margin-top:16px;padding:16px;background:#111A2E;border-radius:10px;border:1px solid #1E293B}
+#fw-panel{display:block;margin-top:0}
+#upload-panel label,#upload-img-panel label,#fw-panel label{font-size:13px;color:#6B7B8D;display:block;margin-bottom:8px}
+#upload-panel input[type=file],#upload-img-panel input[type=file],#fw-panel input[type=file]{color:#eee;margin-bottom:8px;width:100%}
+#upload-progress,#upload-img-progress,#fw-progress{width:100%;height:6px;display:none;accent-color:#4ADE80}
+#upload-status,#upload-img-status,#fw-status{font-size:12px;color:#6B7B8D;margin-top:8px;min-height:14px}
+#btn-upload-start:disabled,#btn-img-upload-start:disabled,#btn-fw-install:disabled{opacity:.5;cursor:default}
+#btn-fw-install{padding:8px 18px;border-radius:6px;border:none;cursor:pointer;font-size:14px;font-weight:500;background:#4ADE80;color:#0A0E1A}
+#fw-pin{padding:8px 10px;border:1px solid #1E293B;border-radius:6px;background:#0A0E1A;color:#eee;font-size:14px;width:100px}
+#fw-pin:focus{outline:none;border-color:#4ADE80}
 
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:100;padding:16px}
 .modal-box{background:#111A2E;border-radius:12px;width:100%;max-width:420px;max-height:90vh;overflow-y:auto;border:1px solid #1E293B;animation:modalIn .2s ease}
@@ -104,6 +109,7 @@ h1{font-size:22px;color:#4ADE80;font-weight:700}
 <div id="tabs">
 <button id="tab-tags" class="tab active">Tags</button>
 <button id="tab-music" class="tab">Music</button>
+<button id="tab-system" class="tab">System</button>
 </div>
 <div id="view-tags">
 <div id="tag-grid"></div>
@@ -135,6 +141,20 @@ h1{font-size:22px;color:#4ADE80;font-weight:700}
 <div id="view-music" style="display:none">
 <div id="music-grid"></div>
 <div id="music-pagination"></div>
+</div>
+<div id="view-system" style="display:none">
+<div id="fw-panel">
+<div style="font-size:14px;margin-bottom:12px">Firmware: <span id="fw-version" style="color:#4ADE80">&hellip;</span></div>
+<label>Upload a firmware image (.bin built with the matching partition table). The device installs it to the inactive slot and reboots when done.</label>
+<input type="file" id="fw-input" accept=".bin">
+<label>Update PIN (shown on the device screen)</label>
+<input id="fw-pin" inputmode="numeric" maxlength="4" placeholder="0000" autocomplete="off">
+<div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+<button id="btn-fw-install">Install &amp; Reboot</button>
+</div>
+<div id="fw-status"></div>
+<progress id="fw-progress" max="100" value="0"></progress>
+</div>
 </div>
 </div>
 
@@ -224,6 +244,42 @@ async function loadMusic(){
 var r=await fetch('/api/music');
 var d=await r.json();
 music=d.music||[];
+}
+
+async function loadVersion(){
+try{
+var r=await fetch('/api/version');
+var d=await r.json();
+document.getElementById('fw-version').textContent=d.version||'?';
+}catch(e){}
+}
+
+async function installFirmware(){
+var inp=document.getElementById('fw-input');
+var f=inp.files[0];
+if(!f){toast('Please select a .bin file first','err');return;}
+if(!/\.bin$/i.test(f.name)){toast('Not a .bin file','err');return;}
+var pin=document.getElementById('fw-pin').value.trim();
+if(!/^\d{4}$/.test(pin)){toast('Enter the 4-digit PIN from the device screen','err');return;}
+if(!confirm('Install '+f.name+' ('+formatSize(f.size)+')?\n\nThe device reboots when done; restart the Web Server from the device menu to reconnect.'))return;
+var btn=document.getElementById('btn-fw-install');
+var st=document.getElementById('fw-status');
+var pr=document.getElementById('fw-progress');
+btn.disabled=true;
+pr.style.display='block';pr.value=0;
+st.textContent='Uploading firmware…';
+try{
+await uploadBlob('/update?size='+f.size+'&pin='+encodeURIComponent(pin),f,f.name,function(p){pr.value=p;});
+st.textContent='Installed. Device is rebooting — start the Web Server from the device menu to reconnect.';
+toast('Firmware installed','ok');
+}catch(e){
+st.textContent='';
+toast(e.message||'Update failed','err');
+}finally{
+btn.disabled=false;
+pr.style.display='none';pr.value=0;
+inp.value='';
+}
 }
 
 function renderGrid(){
@@ -354,11 +410,14 @@ renderMusicPagination();
 }
 
 function switchView(v){
-document.getElementById('view-tags').style.display=v==='tags'?'block':'none';
-document.getElementById('view-music').style.display=v==='music'?'block':'none';
-document.getElementById('tab-tags').className='tab'+(v==='tags'?' active':'');
-document.getElementById('tab-music').className='tab'+(v==='music'?' active':'');
-if(v==='music')renderMusic();else render();
+var views=['tags','music','system'];
+for(var i=0;i<views.length;i++){
+document.getElementById('view-'+views[i]).style.display=views[i]===v?'block':'none';
+document.getElementById('tab-'+views[i]).className='tab'+(views[i]===v?' active':'');
+}
+if(v==='music')renderMusic();
+else if(v==='tags')render();
+else document.getElementById('stats').textContent='';
 }
 
 function showMusicModal(name){
@@ -533,6 +592,9 @@ if(e.target===e.currentTarget)hideModal();
 
 document.getElementById('tab-tags').addEventListener('click',function(){switchView('tags');});
 document.getElementById('tab-music').addEventListener('click',function(){switchView('music');});
+document.getElementById('tab-system').addEventListener('click',function(){switchView('system');});
+
+document.getElementById('btn-fw-install').addEventListener('click',installFirmware);
 
 document.getElementById('btn-music-save').addEventListener('click',saveMusicMeta);
 document.getElementById('btn-music-cancel').addEventListener('click',hideMusicModal);
@@ -876,7 +938,7 @@ function(){loadImages().then(function(){inp.value='';});});
 });
 
 (async function(){
-await Promise.all([loadTags(),loadFiles(),loadImages(),loadMusic()]);
+await Promise.all([loadTags(),loadFiles(),loadImages(),loadMusic(),loadVersion()]);
 render();
 })();
 </script>
@@ -1252,7 +1314,7 @@ static const char *writeWavMeta(const String &path, const char *title, const cha
   uint32_t tStream = millis();
   size_t streamed = 0, lastReport = 0;
   int lastPct = -1;
-  drawWebWriteProgress(0);
+  drawWebProgress("Writing metadata", 0);
   f.seek(dataChunkStart);
   while (ok) {
     size_t n = f.read(buf, bufSize);
@@ -1261,7 +1323,7 @@ static const char *writeWavMeta(const String &path, const char *title, const cha
     written += n;
     streamed += n;
     int pct = (int)(streamed * 100 / toStream);
-    if (pct != lastPct) { drawWebWriteProgress(pct); lastPct = pct; }
+    if (pct != lastPct) { drawWebProgress("Writing metadata", pct); lastPct = pct; }
     if (streamed - lastReport >= 1048576) {  // progress every 1 MB
       lastReport = streamed;
       uint32_t el = millis() - tStream;
@@ -1272,7 +1334,7 @@ static const char *writeWavMeta(const String &path, const char *title, const cha
   }
   if (buf != wavScanBuf) free(buf);
   f.close();
-  drawWebWriteProgress(-1);
+  drawWebProgress(nullptr, -1);
   Serial.printf("[meta] streamed %u KB in %lums (write %s)\n",
                 (unsigned)(streamed / 1024), millis() - tStream, ok ? "OK" : "FAILED");
 
@@ -1402,6 +1464,129 @@ static void handleApiFileDelete() {
   }
 
   sendOK(String("\"removed\":[") + removed + "]");
+}
+
+// ================================================================
+//  GET /api/version  →  {"version":"v1.6.0"}
+// ================================================================
+
+static void handleApiVersion() {
+  sendJSON(200, String("{\"version\":") + jsonStr(VERSION_STRING) + "}");
+}
+
+// ================================================================
+//  POST /update?size=...  →  OTA firmware upload (multipart .bin)
+//  Writes into the inactive OTA slot via Update.h; on success the
+//  response is sent and the device reboots into the new firmware.
+//  No rollback: a firmware that boots but misbehaves needs USB reflash.
+// ================================================================
+
+static bool   s_updateOK = false;
+static size_t s_updateExpected = 0;
+static int    s_updateLastPct = -1;
+static const char *s_updateError = nullptr;
+static int    s_updateErrCode = 500;  // 4xx for client errors (PIN/size), 500 for OTA failures
+
+// Per-session PIN shown on the device's web screen — proves physical
+// presence before accepting a firmware image (the AP password alone is
+// not enough to flash the device). After PIN_MAX_FAILURES wrong guesses
+// the endpoint locks for the rest of the session (counter and PIN reset
+// when the web server is restarted from the device), so the 10,000-PIN
+// space cannot be brute-forced online.
+#define PIN_MAX_FAILURES 5
+static char    s_webPin[5] = "";
+static uint8_t s_pinFailures = 0;
+
+const char *getWebPin() {
+  return s_webPin;
+}
+
+static void handleFwUpdate() {
+  HTTPUpload &up = server.upload();
+
+  if (up.status == UPLOAD_FILE_START) {
+    s_updateOK = false;
+    s_updateError = nullptr;
+    s_updateErrCode = 500;
+    s_updateLastPct = -1;
+    s_updateExpected = 0;
+    if (s_pinFailures >= PIN_MAX_FAILURES) {
+      Serial.println("[ota] ERROR: PIN locked out");
+      s_updateError = "Too many failed PINs - restart the web server on the device";
+      s_updateErrCode = 429;
+      return;  // Update never begins; WRITE/END stay no-ops
+    }
+    if (server.arg("pin") != s_webPin) {
+      s_pinFailures++;
+      Serial.printf("[ota] ERROR: invalid PIN (attempt %u/%u)\n",
+                    (unsigned)s_pinFailures, (unsigned)PIN_MAX_FAILURES);
+      s_updateError = "Invalid PIN (shown on the device screen)";
+      s_updateErrCode = 403;
+      return;
+    }
+    s_pinFailures = 0;
+    long sizeArg = server.arg("size").toInt();
+    if (sizeArg <= 0) {
+      // Without the exact size, a truncated upload could not be detected.
+      Serial.println("[ota] ERROR: missing/invalid size parameter");
+      s_updateError = "Missing or invalid size parameter";
+      s_updateErrCode = 400;
+      return;
+    }
+    s_updateExpected = (size_t)sizeArg;
+    Serial.printf("[ota] start '%s' (%u bytes)\n", up.filename.c_str(), (unsigned)s_updateExpected);
+    if (!Update.begin(s_updateExpected)) {
+      s_updateError = Update.errorString();
+      Serial.printf("[ota] ERROR: begin failed: %s\n", s_updateError);
+    } else {
+      drawWebProgress("Installing", 0);
+    }
+  } else if (up.status == UPLOAD_FILE_WRITE) {
+    if (Update.isRunning()) {
+      if (Update.write(up.buf, up.currentSize) != up.currentSize) {
+        // Capture the real failure before abort() overwrites it with "Aborted".
+        s_updateError = Update.errorString();
+        Serial.printf("[ota] ERROR: write failed: %s\n", s_updateError);
+        Update.abort();
+      } else if (s_updateExpected) {
+        int pct = (int)(Update.progress() * 100 / s_updateExpected);
+        if (pct != s_updateLastPct) { drawWebProgress("Installing", pct); s_updateLastPct = pct; }
+      }
+    }
+  } else if (up.status == UPLOAD_FILE_END) {
+    // Require the exact declared byte count — end(true) would finalize a
+    // short upload by shrinking the expected size to whatever arrived.
+    if (!Update.isRunning()) {
+      // begin() never ran (lockout / bad PIN / bad size / begin failure)
+      // or a write aborted — error already recorded.
+    } else if (Update.progress() != s_updateExpected) {
+      Serial.printf("[ota] ERROR: incomplete upload (%u/%u bytes)\n",
+                    (unsigned)Update.progress(), (unsigned)s_updateExpected);
+      s_updateError = "Incomplete upload";
+      s_updateErrCode = 400;
+      Update.abort();
+    } else if (Update.end(false)) {  // isFinished() holds; full verification
+      s_updateOK = true;
+      Serial.printf("[ota] success, %u bytes — rebooting\n", (unsigned)up.totalSize);
+    } else {
+      Serial.printf("[ota] ERROR: end failed: %s\n", Update.errorString());
+    }
+    drawWebProgress(nullptr, -1);
+  } else if (up.status == UPLOAD_FILE_ABORTED) {
+    Serial.println("[ota] aborted by client");
+    Update.abort();
+    drawWebProgress(nullptr, -1);
+  }
+}
+
+static void handleFwUpdateComplete() {
+  if (s_updateOK) {
+    sendOK();
+    delay(750);  // let the response flush before the connection dies
+    ESP.restart();
+  } else {
+    sendError(s_updateErrCode, s_updateError ? s_updateError : Update.errorString());
+  }
 }
 
 // ================================================================
@@ -1609,6 +1794,11 @@ void initWebServer() {
   Serial.printf("AP %s, IP: %s\n", apOk ? "up" : "FAILED",
                 WiFi.softAPIP().toString().c_str());
 
+  // Fresh update PIN per web-server session; failed-attempt lockout resets
+  // with it (restarting the server requires physical access to the device).
+  snprintf(s_webPin, sizeof(s_webPin), "%04u", (unsigned)(esp_random() % 10000));
+  s_pinFailures = 0;
+
   // Register routes once — server.on() appends to the handler list, so
   // re-registering on every start/stop cycle leaks heap.
   static bool s_routesRegistered = false;
@@ -1627,9 +1817,11 @@ void initWebServer() {
     server.on("/api/file/meta", HTTP_OPTIONS, handleOptions);
     server.on("/api/file",     HTTP_DELETE, handleApiFileDelete);
     server.on("/api/file",     HTTP_OPTIONS, handleOptions);
+    server.on("/api/version",  HTTP_GET,    handleApiVersion);
     server.on("/img",          HTTP_GET,    handleImg);
     server.on("/upload",       HTTP_POST,   handleUploadComplete, handleUpload);
     server.on("/upload-img",   HTTP_POST,   handleUploadImgComplete, handleUploadImg);
+    server.on("/update",       HTTP_POST,   handleFwUpdateComplete, handleFwUpdate);
   }
 
   server.begin();

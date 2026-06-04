@@ -3,6 +3,7 @@
 #include "encoder.h"
 #include "audio.h"
 #include "timer_logic.h"
+#include "web.h"  // getWebPin() for the web server screen
 #include <SD.h>
 #include <esp_heap_caps.h>
 
@@ -406,9 +407,9 @@ void drawWebServerScreen(int connections) {
   centerText(conn, y, C_TEXT, 2);
 
   y += 30;
-  gfx.setTextColor(C_MUTED);
-  gfx.setTextSize(2);
-  gfx.setCursor(12, y); gfx.print("Open in browser to manage tags");
+  char pinLine[24];
+  snprintf(pinLine, sizeof(pinLine), "Update PIN: %s", getWebPin());
+  centerText(pinLine, y, C_MUTED, 2);
 
   drawHintBar("click to stop server");
   s_webDrawn = connections;
@@ -425,17 +426,18 @@ void updateWebConnectionCount(int connections) {
   s_webDrawn = connections;
 }
 
-// Metadata-rewrite progress — free band (y=230..280) between the
-// "Open in browser" hint and the hint bar. pct<0 clears the area.
-void drawWebWriteProgress(int pct) {
+// Long-operation progress (metadata rewrite, firmware update) — free band
+// (y=230..280) between the update-PIN line and the hint bar.
+// pct<0 clears the area.
+void drawWebProgress(const char *label, int pct) {
   if (pct < 0) {
     gfx.fillRect(0, 230, gfx.width(), 50, C_BG);
     return;
   }
-  char label[32];
-  snprintf(label, sizeof(label), "Writing metadata %d%%", pct);
+  char text[40];
+  snprintf(text, sizeof(text), "%s %d%%", label, pct);
   gfx.fillRect(0, 230, gfx.width(), 24, C_BG);  // full text-area clear (see CLAUDE.md)
-  centerText(label, 234, C_TEXT, 2);
+  centerText(text, 234, C_TEXT, 2);
 
   int barW = gfx.width() - 40;
   int fill = barW * pct / 100;
