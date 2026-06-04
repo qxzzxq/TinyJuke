@@ -917,6 +917,13 @@ static String jsonStr(const char *s) {
   return out;
 }
 
+// Leftover temp file from an interrupted metadata rewrite (power loss /
+// reset mid-write) — hide from listings.
+static bool isTmpName(const char *base) {
+  size_t n = strlen(base);
+  return n > 4 && strcmp(base + n - 4, ".tmp") == 0;
+}
+
 // ================================================================
 //  GET /api/tags  →  {"tags":[{uid,file,title,artist,album,img},...]}
 // ================================================================
@@ -957,9 +964,11 @@ static void handleApiFiles() {
         const char *name = f.name();
         const char *base = strrchr(name, '/');
         if (base) base++; else base = name;
-        if (!first) json += ",";
-        first = false;
-        json += jsonStr(base);
+        if (!isTmpName(base)) {
+          if (!first) json += ",";
+          first = false;
+          json += jsonStr(base);
+        }
       }
       f.close();
     }
@@ -1105,6 +1114,7 @@ static void handleApiMusic() {
         const char *name = f.name();
         const char *base = strrchr(name, '/');
         if (base) base++; else base = name;
+        if (isTmpName(base)) { f.close(); continue; }
 
         size_t n = f.read(wavScanBuf, sizeof(wavScanBuf));
         WavHeader hdr = {};
@@ -1139,13 +1149,19 @@ static void handleApiMusic() {
 
 // Returns nullptr on success, else a short error message.
 static const char *writeWavMeta(const String &path, const char *title, const char *artist) {
+  uint32_t t0 = millis();
+  Serial.printf("[meta] writeWavMeta '%s' title='%s' artist='%s'\n", path.c_str(), title, artist);
+
   File f = SD.open(path, FILE_READ);
-  if (!f) return "Cannot open file";
+  if (!f) { Serial.println("[meta] ERROR: cannot open file"); return "Cannot open file"; }
+  size_t fileSize = (size_t)f.size();
   size_t headLen = f.read(wavScanBuf, sizeof(wavScanBuf));
+  Serial.printf("[meta] fileSize=%u headLen=%u\n", (unsigned)fileSize, (unsigned)headLen);
 
   size_t listOff = 0;
   if (findCanonicalListInfo(wavScanBuf, headLen, &listOff)) {
     // Fast path: in-place patch.
+    Serial.printf("[meta] canonical chunk at %u -> fast path\n", (unsigned)listOff);
     f.close();
     File w = SD.open(path, "r+");
     if (w) {
@@ -1157,25 +1173,34 @@ static const char *writeWavMeta(const String &path, const char *title, const cha
       writeCanonicalField(field, artist);
       ok = ok && w.seek(artistOff) && w.write(field, WAV_INFO_CAP) == WAV_INFO_CAP;
       w.close();
+      Serial.printf("[meta] fast path %s in %lums\n", ok ? "OK" : "FAILED", millis() - t0);
       return ok ? nullptr : "Write failed";
     }
     // "r+" unsupported/failed → fall through to the slow path.
+    Serial.println("[meta] WARN: open \"r+\" failed -> falling back to slow path");
     f = SD.open(path, FILE_READ);
-    if (!f) return "Cannot open file";
+    if (!f) { Serial.println("[meta] ERROR: cannot reopen file"); return "Cannot open file"; }
     headLen = f.read(wavScanBuf, sizeof(wavScanBuf));
   }
 
   WavHeader hdr = {};
   if (!parseWavHeaderBuffer(wavScanBuf, headLen, hdr)) {
+    Serial.println("[meta] ERROR: header parse failed -> not a valid WAV");
     f.close();
     return "Not a valid WAV";
   }
   size_t dataChunkStart = hdr.dataOffset - 8;
+  Serial.printf("[meta] slow path: dataOffset=%u dataSize=%u (~%us of audio)\n",
+                (unsigned)hdr.dataOffset, (unsigned)hdr.dataSize, (unsigned)wavDurationSeconds(hdr));
 
   String tmpPath = path + ".tmp";
-  if (SD.exists(tmpPath)) SD.remove(tmpPath);
+  if (SD.exists(tmpPath)) {
+    Serial.println("[meta] removing stale .tmp from a previous attempt");
+    SD.remove(tmpPath);
+  }
   File w = SD.open(tmpPath, FILE_WRITE);
   if (!w) {
+    Serial.println("[meta] ERROR: cannot create temp file");
     f.close();
     return "Cannot create temp file";
   }
@@ -1193,6 +1218,9 @@ static const char *writeWavMeta(const String &path, const char *title, const cha
     if (srcPos + total > dataChunkStart) total = dataChunkStart - srcPos;
     bool isListInfo = memcmp(wavScanBuf + srcPos, "LIST", 4) == 0 && csize >= 4 &&
                       memcmp(wavScanBuf + srcPos + 8, "INFO", 4) == 0;
+    Serial.printf("[meta] front chunk '%c%c%c%c' size=%u -> %s\n",
+                  wavScanBuf[srcPos], wavScanBuf[srcPos + 1], wavScanBuf[srcPos + 2], wavScanBuf[srcPos + 3],
+                  (unsigned)csize, isListInfo ? "drop (old LIST INFO)" : "copy");
     if (!isListInfo) {
       ok = w.write(wavScanBuf + srcPos, total) == total;
       written += total;
@@ -1207,14 +1235,28 @@ static const char *writeWavMeta(const String &path, const char *title, const cha
   written += sizeof(chunk);
 
   // Stream the remainder: data chunk header + payload + pad + trailing chunks.
+  Serial.printf("[meta] streaming %u KB through %u-byte buffer...\n",
+                (unsigned)((fileSize - dataChunkStart) / 1024), (unsigned)sizeof(wavScanBuf));
+  uint32_t tStream = millis();
+  size_t streamed = 0, lastReport = 0;
   f.seek(dataChunkStart);
   while (ok) {
     size_t n = f.read(wavScanBuf, sizeof(wavScanBuf));
     if (n == 0) break;
     ok = w.write(wavScanBuf, n) == n;
     written += n;
+    streamed += n;
+    if (streamed - lastReport >= 1048576) {  // progress every 1 MB
+      lastReport = streamed;
+      uint32_t el = millis() - tStream;
+      Serial.printf("[meta] ... %u/%u KB, %u KB/s\n", (unsigned)(streamed / 1024),
+                    (unsigned)((fileSize - dataChunkStart) / 1024),
+                    (unsigned)(el ? streamed / el : 0));
+    }
   }
   f.close();
+  Serial.printf("[meta] streamed %u KB in %lums (write %s)\n",
+                (unsigned)(streamed / 1024), millis() - tStream, ok ? "OK" : "FAILED");
 
   // Patch RIFF size from actual bytes written.
   uint32_t riffSize = (uint32_t)(written - 8);
@@ -1224,14 +1266,21 @@ static const char *writeWavMeta(const String &path, const char *title, const cha
   w.close();
 
   if (!ok) {
+    Serial.println("[meta] ERROR: rewrite failed, removing .tmp");
     SD.remove(tmpPath);
     return "Rewrite failed";
   }
+  Serial.println("[meta] replacing original (remove + rename)...");
   if (!SD.remove(path)) {
+    Serial.println("[meta] ERROR: cannot remove original");
     SD.remove(tmpPath);
     return "Cannot replace original";
   }
-  if (!SD.rename(tmpPath, path)) return "Rename failed";
+  if (!SD.rename(tmpPath, path)) {
+    Serial.println("[meta] ERROR: rename failed");
+    return "Rename failed";
+  }
+  Serial.printf("[meta] slow path OK in %lums total\n", millis() - t0);
   return nullptr;
 }
 
@@ -1245,6 +1294,7 @@ static void handleApiFileMetaPost() {
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, body);
   if (err) {
+    Serial.println("[meta] ERROR: invalid JSON body");
     sendError(400, "Invalid JSON");
     return;
   }
@@ -1255,12 +1305,14 @@ static void handleApiFileMetaPost() {
     return;
   }
   if (!isSafeName(name)) {
+    Serial.printf("[meta] ERROR: unsafe name '%s'\n", name.c_str());
     sendError(403, "Invalid name");
     return;
   }
 
   String path = "/music/" + name;
   if (!SD.exists(path)) {
+    Serial.printf("[meta] ERROR: not found '%s'\n", path.c_str());
     sendError(404, "File not found");
     return;
   }
@@ -1290,7 +1342,9 @@ static void handleApiFileDelete() {
     sendError(404, "File not found");
     return;
   }
+  Serial.printf("[file] deleting '%s'\n", path.c_str());
   if (!SD.remove(path)) {
+    Serial.println("[file] ERROR: SD.remove failed");
     sendError(500, "Delete failed");
     return;
   }
@@ -1318,6 +1372,7 @@ static void handleApiFileDelete() {
   }
 
   if (removedAny) {
+    Serial.printf("[file] cascade-removed tags: %s\n", removed.c_str());
     if (SD.exists("/tags.json")) SD.remove("/tags.json");
     File f = SD.open("/tags.json", FILE_WRITE);
     if (!f) {
