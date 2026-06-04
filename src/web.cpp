@@ -1478,12 +1478,14 @@ static void handleApiVersion() {
 static bool   s_updateOK = false;
 static size_t s_updateExpected = 0;
 static int    s_updateLastPct = -1;
+static const char *s_updateError = nullptr;
 
 static void handleFwUpdate() {
   HTTPUpload &up = server.upload();
 
   if (up.status == UPLOAD_FILE_START) {
     s_updateOK = false;
+    s_updateError = nullptr;
     s_updateLastPct = -1;
     s_updateExpected = (size_t)server.arg("size").toInt();  // exact .bin size from the SPA
     size_t target = s_updateExpected ? s_updateExpected : UPDATE_SIZE_UNKNOWN;
@@ -1504,7 +1506,15 @@ static void handleFwUpdate() {
       }
     }
   } else if (up.status == UPLOAD_FILE_END) {
-    if (Update.isRunning() && Update.end(true)) {
+    // end(true) would finalize a short upload by shrinking the expected
+    // size to whatever arrived — require the exact byte count instead so
+    // a truncated image is never marked successful.
+    if (s_updateExpected && Update.progress() != s_updateExpected) {
+      Serial.printf("[ota] ERROR: incomplete upload (%u/%u bytes)\n",
+                    (unsigned)Update.progress(), (unsigned)s_updateExpected);
+      s_updateError = "Incomplete upload";
+      Update.abort();
+    } else if (Update.isRunning() && Update.end(s_updateExpected == 0)) {
       s_updateOK = true;
       Serial.printf("[ota] success, %u bytes — rebooting\n", (unsigned)up.totalSize);
     } else {
@@ -1524,7 +1534,7 @@ static void handleFwUpdateComplete() {
     delay(750);  // let the response flush before the connection dies
     ESP.restart();
   } else {
-    sendError(500, Update.errorString());
+    sendError(500, s_updateError ? s_updateError : Update.errorString());
   }
 }
 
