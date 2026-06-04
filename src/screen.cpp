@@ -425,6 +425,24 @@ void updateWebConnectionCount(int connections) {
   s_webDrawn = connections;
 }
 
+// Metadata-rewrite progress — free band (y=230..280) between the
+// "Open in browser" hint and the hint bar. pct<0 clears the area.
+void drawWebWriteProgress(int pct) {
+  if (pct < 0) {
+    gfx.fillRect(0, 230, gfx.width(), 50, C_BG);
+    return;
+  }
+  char label[32];
+  snprintf(label, sizeof(label), "Writing metadata %d%%", pct);
+  gfx.fillRect(0, 230, gfx.width(), 24, C_BG);  // full text-area clear (see CLAUDE.md)
+  centerText(label, 234, C_TEXT, 2);
+
+  int barW = gfx.width() - 40;
+  int fill = barW * pct / 100;
+  gfx.drawRect(20, 262, barW, 10, C_MUTED);
+  if (fill > 0) gfx.fillRect(20, 262, fill, 10, C_ACCENT);
+}
+
 // ================================================================
 //  Bluetooth screen
 // ================================================================

@@ -1,10 +1,12 @@
 #include "web.h"
 #include "tags.h"
 #include "wav_parser.h"
+#include "screen.h"
 
 #include <WiFi.h>
 #include <WebServer.h>
 #include <SD.h>
+#include <esp_heap_caps.h>
 
 static WebServer server(80);
 
@@ -174,6 +176,7 @@ h1{font-size:22px;color:#4ADE80;font-weight:700}
 <label>Artist</label>
 <input id="mmodal-artist" placeholder="Artist name" autocomplete="off">
 <div id="mmodal-links" style="font-size:12px;color:#6B7B8D"></div>
+<div id="mmodal-status" style="font-size:12px;color:#FACC15;min-height:14px"></div>
 </div>
 <div class="modal-footer">
 <button id="btn-music-delete">Delete</button>
@@ -384,6 +387,7 @@ if(!editingFile)return;
 var btn=document.getElementById('btn-music-save');
 btn.disabled=true;
 btn.textContent='Writing…';
+document.getElementById('mmodal-status').textContent='Writing metadata… the first edit of a file rewrites it and can take a minute (progress shown on the device screen).';
 try{
 var body={name:editingFile,
 title:document.getElementById('mmodal-title').value.trim(),
@@ -397,6 +401,7 @@ toast(e.message||'Save failed','err');
 }finally{
 btn.disabled=false;
 btn.textContent='Save';
+document.getElementById('mmodal-status').textContent='';
 }
 }
 
@@ -1235,26 +1240,39 @@ static const char *writeWavMeta(const String &path, const char *title, const cha
   written += sizeof(chunk);
 
   // Stream the remainder: data chunk header + payload + pad + trailing chunks.
-  Serial.printf("[meta] streaming %u KB through %u-byte buffer...\n",
-                (unsigned)((fileSize - dataChunkStart) / 1024), (unsigned)sizeof(wavScanBuf));
+  // A large PSRAM buffer minimises read<->write switching on the SD card
+  // (4 KB alternating chunks measured ~146 KB/s); fall back to the small
+  // static buffer if PSRAM is unavailable.
+  size_t bufSize = 262144;
+  uint8_t *buf = (uint8_t *)heap_caps_malloc(bufSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!buf) { buf = wavScanBuf; bufSize = sizeof(wavScanBuf); }
+  size_t toStream = fileSize - dataChunkStart;
+  Serial.printf("[meta] streaming %u KB through %u KB buffer...\n",
+                (unsigned)(toStream / 1024), (unsigned)(bufSize / 1024));
   uint32_t tStream = millis();
   size_t streamed = 0, lastReport = 0;
+  int lastPct = -1;
+  drawWebWriteProgress(0);
   f.seek(dataChunkStart);
   while (ok) {
-    size_t n = f.read(wavScanBuf, sizeof(wavScanBuf));
+    size_t n = f.read(buf, bufSize);
     if (n == 0) break;
-    ok = w.write(wavScanBuf, n) == n;
+    ok = w.write(buf, n) == n;
     written += n;
     streamed += n;
+    int pct = (int)(streamed * 100 / toStream);
+    if (pct != lastPct) { drawWebWriteProgress(pct); lastPct = pct; }
     if (streamed - lastReport >= 1048576) {  // progress every 1 MB
       lastReport = streamed;
       uint32_t el = millis() - tStream;
       Serial.printf("[meta] ... %u/%u KB, %u KB/s\n", (unsigned)(streamed / 1024),
-                    (unsigned)((fileSize - dataChunkStart) / 1024),
+                    (unsigned)(toStream / 1024),
                     (unsigned)(el ? streamed / el : 0));
     }
   }
+  if (buf != wavScanBuf) free(buf);
   f.close();
+  drawWebWriteProgress(-1);
   Serial.printf("[meta] streamed %u KB in %lums (write %s)\n",
                 (unsigned)(streamed / 1024), millis() - tStream, ok ? "OK" : "FAILED");
 
