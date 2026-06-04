@@ -126,6 +126,7 @@ The web interface provides:
 - **Embedded album art** — when an uploaded MP3 / M4A / FLAC carries embedded cover art (ID3v2 APIC, MP4 `covr`, or FLAC PICTURE block), it is auto-extracted, centre-cropped, scaled to 300×300, written as 24-bit BMP, and uploaded to `/img/` alongside the audio. The resulting `.bmp` shares the audio file's basename so it can be picked in the tag editor.
 - **Image upload** — manually upload BMP/JPG/PNG album art to `/img/` (`POST /upload-img`)
 - **Album art picker** — choose any image in `/img/` when editing a tag (served via `GET /img?name=...`)
+- **Music management** — the Music tab lists every file in `/music/` with size, duration, and embedded title/artist (`GET /api/music`). Edit metadata (written into the WAV's LIST INFO chunk via `POST /api/file/meta`) or delete a file (`DELETE /api/file?name=...`) — deleting also removes any tags that reference it, after a confirmation listing them. Files uploaded through the web UI carry a fixed-size LIST INFO chunk so metadata edits are instant; older files are rewritten once on first edit (can take ~tens of seconds for long tracks).
 
 Changes are written to `/tags.json` on the SD card immediately.
 
@@ -196,6 +197,6 @@ All fields except `file` are optional. `img` paths are relative to `/img/` on th
 
 ## Status
 
-Milestone 4 in progress. Added: Bluetooth A2DP sink (speaker) mode with AVRCP metadata display, encoder volume control, sleep-timer + power-save integration, and an RFID tag-detected prompt that hands off to jukebox playback.
+Milestone 4 in progress. Added: Bluetooth A2DP sink (speaker) mode with AVRCP metadata display, encoder volume control, sleep-timer + power-save integration, an RFID tag-detected prompt that hands off to jukebox playback, and web-based music management (list / edit WAV metadata / delete with tag cascade).
 
 Prior milestones: web-based tag management, WAV + image upload, browser-side MP3/M4A/AAC/OGG/FLAC → WAV conversion with embedded-art extraction, runtime volume control, encoder-driven GUI with Brightness / Power Saving / Sleep Timer / Version screens, BMP album art (240×240, scaled in PSRAM), tag hot-swap detection, and amp-touch-noise mitigation via I2S priming.

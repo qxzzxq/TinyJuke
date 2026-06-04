@@ -281,6 +281,145 @@ void test_wav_meta_rejects_non_riff() {
 }
 
 // ----------------------------------------------------------------
+//  Canonical LIST INFO chunk (in-place metadata editing)
+// ----------------------------------------------------------------
+
+// RIFF / fmt / LIST(canonical) / data — the layout written by the web UI.
+static size_t buildCanonicalWav(uint8_t *buf, size_t bufLen,
+                                const char *title, const char *artist,
+                                uint32_t dataBytes) {
+  size_t total = 12 + 24 + WAV_CANON_LIST_SIZE + 8 + dataBytes;
+  if (total > bufLen) return 0;
+
+  memcpy(buf, "RIFF", 4);
+  putLE32(buf + 4, (uint32_t)(total - 8));
+  memcpy(buf + 8, "WAVE", 4);
+
+  memcpy(buf + 12, "fmt ", 4);
+  putLE32(buf + 16, 16);
+  putLE16(buf + 20, 1); putLE16(buf + 22, 1);
+  putLE32(buf + 24, 44100); putLE32(buf + 28, 88200);
+  putLE16(buf + 32, 2); putLE16(buf + 34, 16);
+
+  buildCanonicalListInfo(buf + 36, title, artist);
+
+  memcpy(buf + 36 + WAV_CANON_LIST_SIZE, "data", 4);
+  putLE32(buf + 40 + WAV_CANON_LIST_SIZE, dataBytes);
+  memset(buf + 44 + WAV_CANON_LIST_SIZE, 0, dataBytes);
+  return total;
+}
+
+void test_canon_build_layout() {
+  uint8_t out[WAV_CANON_LIST_SIZE];
+  size_t n = buildCanonicalListInfo(out, "Title", "Artist");
+  TEST_ASSERT_EQUAL_UINT32(WAV_CANON_LIST_SIZE, (uint32_t)n);
+  TEST_ASSERT_EQUAL_MEMORY("LIST", out, 4);
+  TEST_ASSERT_EQUAL_UINT32(WAV_CANON_LIST_SIZE - 8, out[4] | (out[5] << 8) | (out[6] << 16) | (out[7] << 24));
+  TEST_ASSERT_EQUAL_MEMORY("INFO", out + 8, 4);
+  TEST_ASSERT_EQUAL_MEMORY("INAM", out + 12, 4);
+  TEST_ASSERT_EQUAL_UINT32(WAV_INFO_CAP, out[16]);
+  TEST_ASSERT_EQUAL_STRING("Title", (const char *)(out + 20));
+  TEST_ASSERT_EQUAL_MEMORY("IART", out + 20 + WAV_INFO_CAP, 4);
+  TEST_ASSERT_EQUAL_UINT32(WAV_INFO_CAP, out[24 + WAV_INFO_CAP]);
+  TEST_ASSERT_EQUAL_STRING("Artist", (const char *)(out + 28 + WAV_INFO_CAP));
+}
+
+void test_canon_build_truncates_long_strings() {
+  char longStr[100];
+  memset(longStr, 'A', sizeof(longStr) - 1);
+  longStr[sizeof(longStr) - 1] = '\0';
+
+  uint8_t out[WAV_CANON_LIST_SIZE];
+  buildCanonicalListInfo(out, longStr, longStr);
+  const char *title = (const char *)(out + 20);
+  TEST_ASSERT_EQUAL_UINT32(WAV_INFO_CAP - 1, (uint32_t)strlen(title));
+  // Field must not bleed into the IART magic.
+  TEST_ASSERT_EQUAL_MEMORY("IART", out + 20 + WAV_INFO_CAP, 4);
+}
+
+void test_canon_write_field_pads_with_nul() {
+  uint8_t out[WAV_INFO_CAP];
+  memset(out, 0xFF, sizeof(out));
+  writeCanonicalField(out, "Hi");
+  TEST_ASSERT_EQUAL_STRING("Hi", (const char *)out);
+  for (size_t i = 2; i < WAV_INFO_CAP; i++) TEST_ASSERT_EQUAL_UINT8(0, out[i]);
+}
+
+void test_canon_find_positive() {
+  uint8_t buf[512];
+  size_t n = buildCanonicalWav(buf, sizeof(buf), "T", "A", 16);
+  TEST_ASSERT_GREATER_THAN(0, n);
+  size_t off = 0;
+  TEST_ASSERT_TRUE(findCanonicalListInfo(buf, n, &off));
+  TEST_ASSERT_EQUAL_UINT32(36, (uint32_t)off);
+}
+
+void test_canon_find_rejects_noncanonical_size() {
+  uint8_t buf[512];
+  size_t n = buildCanonicalWav(buf, sizeof(buf), "T", "A", 16);
+  putLE32(buf + 36 + 16, 32);  // corrupt INAM size: 64 → 32
+  size_t off = 0;
+  TEST_ASSERT_FALSE(findCanonicalListInfo(buf, n, &off));
+}
+
+void test_canon_find_rejects_list_after_data() {
+  // RIFF / fmt / data / LIST(canonical) — must NOT be found (firmware
+  // playback only scans the front of the file).
+  uint8_t buf[512] = {0};
+  size_t n = buildMinimalWav(buf, sizeof(buf), 1, 44100, 16, 16);
+  size_t p = n;
+  p += buildCanonicalListInfo(buf + p, "T", "A");
+  putLE32(buf + 4, (uint32_t)(p - 8));
+  size_t off = 0;
+  TEST_ASSERT_FALSE(findCanonicalListInfo(buf, p, &off));
+}
+
+void test_canon_field_offsets() {
+  size_t titleOff = 0, artistOff = 0;
+  canonicalListFieldOffsets(36, &titleOff, &artistOff);
+  TEST_ASSERT_EQUAL_UINT32(56, (uint32_t)titleOff);            // 36 + 20
+  TEST_ASSERT_EQUAL_UINT32(128, (uint32_t)artistOff);          // 36 + 28 + 64
+}
+
+void test_canon_roundtrip_firmware_parser() {
+  // Chunk written by the web UI must read back through the same parser the
+  // playback screen uses (proves padded fields are trimmed correctly).
+  uint8_t buf[512];
+  size_t n = buildCanonicalWav(buf, sizeof(buf), "My Song", "Some Artist", 16);
+  WavMeta meta;
+  parseWavMetaBuffer(buf, n, meta);
+  TEST_ASSERT_EQUAL_STRING("My Song", meta.title);
+  TEST_ASSERT_EQUAL_STRING("Some Artist", meta.artist);
+
+  // In-place patch via field offsets, then re-parse.
+  size_t off = 0, titleOff = 0, artistOff = 0;
+  TEST_ASSERT_TRUE(findCanonicalListInfo(buf, n, &off));
+  canonicalListFieldOffsets(off, &titleOff, &artistOff);
+  writeCanonicalField(buf + titleOff, "New Title");
+  writeCanonicalField(buf + artistOff, "");
+  parseWavMetaBuffer(buf, n, meta);
+  TEST_ASSERT_EQUAL_STRING("New Title", meta.title);
+  TEST_ASSERT_EQUAL_STRING("", meta.artist);
+}
+
+void test_wav_duration_basic() {
+  WavHeader hdr = {};
+  hdr.channels = 1; hdr.sampleRate = 44100; hdr.bitsPerSample = 16;
+  hdr.dataSize = 88200;  // 1 second mono 16-bit
+  TEST_ASSERT_EQUAL_UINT32(1, wavDurationSeconds(hdr));
+
+  hdr.channels = 2; hdr.sampleRate = 48000; hdr.bitsPerSample = 24;
+  hdr.dataSize = 48000 * 2 * 3 * 182;  // 182 seconds stereo 24-bit
+  TEST_ASSERT_EQUAL_UINT32(182, wavDurationSeconds(hdr));
+}
+
+void test_wav_duration_zero_rate_is_zero() {
+  WavHeader hdr = {};
+  hdr.dataSize = 1000;
+  TEST_ASSERT_EQUAL_UINT32(0, wavDurationSeconds(hdr));
+}
+
+// ----------------------------------------------------------------
 //  Encoder gray-code step
 // ----------------------------------------------------------------
 
@@ -825,6 +964,17 @@ int main() {
   RUN_TEST(test_wav_meta_inam_iart);
   RUN_TEST(test_wav_meta_no_list_returns_empty);
   RUN_TEST(test_wav_meta_rejects_non_riff);
+
+  RUN_TEST(test_canon_build_layout);
+  RUN_TEST(test_canon_build_truncates_long_strings);
+  RUN_TEST(test_canon_write_field_pads_with_nul);
+  RUN_TEST(test_canon_find_positive);
+  RUN_TEST(test_canon_find_rejects_noncanonical_size);
+  RUN_TEST(test_canon_find_rejects_list_after_data);
+  RUN_TEST(test_canon_field_offsets);
+  RUN_TEST(test_canon_roundtrip_firmware_parser);
+  RUN_TEST(test_wav_duration_basic);
+  RUN_TEST(test_wav_duration_zero_rate_is_zero);
 
   RUN_TEST(test_gray_step_no_change);
   RUN_TEST(test_gray_step_one_cw_cycle);

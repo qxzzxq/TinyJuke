@@ -1,5 +1,6 @@
 #include "web.h"
 #include "tags.h"
+#include "wav_parser.h"
 
 #include <WiFi.h>
 #include <WebServer.h>
@@ -17,7 +18,7 @@ static const char PAGE_HTML[] = R"HTML(
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Jukebox · Tags</title>
+<title>Jukebox</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0A0E1A;color:#eee;min-height:100vh}
@@ -26,8 +27,12 @@ header{display:flex;justify-content:space-between;align-items:baseline;margin-bo
 h1{font-size:22px;color:#4ADE80;font-weight:700}
 #stats{font-size:13px;color:#6B7B8D}
 
-#tag-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px}
-@media(max-width:480px){#tag-grid{grid-template-columns:1fr}}
+#tabs{display:flex;gap:8px;margin-bottom:16px}
+.tab{flex:1;padding:9px 0;border:1px solid #1E293B;border-radius:8px;background:#111A2E;color:#6B7B8D;cursor:pointer;font-size:14px;font-weight:500;transition:background .15s}
+.tab.active{background:#4ADE80;color:#0A0E1A;border-color:#4ADE80;font-weight:600}
+
+#tag-grid,#music-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px}
+@media(max-width:480px){#tag-grid,#music-grid{grid-template-columns:1fr}}
 .tag-card{background:#111A2E;border-radius:10px;overflow:hidden;cursor:pointer;transition:transform .15s,box-shadow .15s;border:1px solid #1E293B}
 .tag-card:hover{transform:translateY(-2px);box-shadow:0 4px 20px rgba(0,0,0,.5);border-color:#4ADE80}
 .tag-card .card-img{width:100%;height:110px;object-fit:cover;background:#1a1f2e;display:block}
@@ -36,17 +41,18 @@ h1{font-size:22px;color:#4ADE80;font-weight:700}
 .tag-card .card-uid{font-family:'SF Mono',ui-monospace,monospace;font-size:10px;color:#6B7B8D;margin-bottom:4px;word-break:break-all}
 .tag-card .card-title{font-size:15px;font-weight:600;color:#fff;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tag-card .card-artist{font-size:13px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tag-card .card-info{font-size:11px;color:#6B7B8D;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 .empty-state{grid-column:1/-1;text-align:center;padding:48px 16px;color:#6B7B8D}
 .empty-state .empty-icon{font-size:48px;margin-bottom:12px}
 .empty-state p{font-size:15px;margin-bottom:4px}
 .empty-state .empty-hint{font-size:13px;color:#455A6E}
 
-#pagination{display:flex;justify-content:center;align-items:center;gap:6px;margin-bottom:20px}
-#pagination button{min-width:36px;height:36px;border:1px solid #1E293B;border-radius:8px;background:#111A2E;color:#eee;cursor:pointer;font-size:14px;transition:background .1s}
-#pagination button:hover:not(:disabled){background:#1E293B}
-#pagination button.active{background:#4ADE80;color:#0A0E1A;border-color:#4ADE80;font-weight:600}
-#pagination button:disabled{opacity:.3;cursor:default}
+#pagination,#music-pagination{display:flex;justify-content:center;align-items:center;gap:6px;margin-bottom:20px}
+#pagination button,#music-pagination button{min-width:36px;height:36px;border:1px solid #1E293B;border-radius:8px;background:#111A2E;color:#eee;cursor:pointer;font-size:14px;transition:background .1s}
+#pagination button:hover:not(:disabled),#music-pagination button:hover:not(:disabled){background:#1E293B}
+#pagination button.active,#music-pagination button.active{background:#4ADE80;color:#0A0E1A;border-color:#4ADE80;font-weight:600}
+#pagination button:disabled,#music-pagination button:disabled{opacity:.3;cursor:default}
 
 #actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
 #actions button{padding:10px 24px;border-radius:8px;border:none;cursor:pointer;font-size:15px;font-weight:500;transition:background .15s}
@@ -75,12 +81,13 @@ h1{font-size:22px;color:#4ADE80;font-weight:700}
 .modal-body input[readonly]{color:#6B7B8D;cursor:default}
 .modal-footer{display:flex;gap:8px;padding:0 16px 16px;justify-content:flex-end}
 .modal-footer button{padding:8px 18px;border-radius:6px;border:none;cursor:pointer;font-size:14px;font-weight:500;transition:background .15s}
-#btn-save{background:#4ADE80;color:#0A0E1A}
-#btn-save:hover{background:#6ee79a}
-#btn-cancel{background:#1E293B;color:#eee}
-#btn-cancel:hover{background:#2d3a4f}
-#btn-remove{background:none;color:#F87171;margin-right:auto}
-#btn-remove:hover{background:#2a1515}
+#btn-save,#btn-music-save{background:#4ADE80;color:#0A0E1A}
+#btn-save:hover,#btn-music-save:hover{background:#6ee79a}
+#btn-save:disabled,#btn-music-save:disabled{opacity:.5;cursor:default}
+#btn-cancel,#btn-music-cancel{background:#1E293B;color:#eee}
+#btn-cancel:hover,#btn-music-cancel:hover{background:#2d3a4f}
+#btn-remove,#btn-music-delete{background:none;color:#F87171;margin-right:auto}
+#btn-remove:hover,#btn-music-delete:hover{background:#2a1515}
 
 #toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:200;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none}
 .toast-msg{padding:10px 20px;border-radius:8px;font-size:14px;text-align:center;animation:toastIn .25s ease;pointer-events:auto;max-width:90vw}
@@ -92,6 +99,11 @@ h1{font-size:22px;color:#4ADE80;font-weight:700}
 <body>
 <div id="app">
 <header><h1>Jukebox</h1><div id="stats"></div></header>
+<div id="tabs">
+<button id="tab-tags" class="tab active">Tags</button>
+<button id="tab-music" class="tab">Music</button>
+</div>
+<div id="view-tags">
 <div id="tag-grid"></div>
 <div id="pagination"></div>
 <div id="actions">
@@ -116,6 +128,11 @@ h1{font-size:22px;color:#4ADE80;font-weight:700}
 </div>
 <div id="upload-img-status"></div>
 <progress id="upload-img-progress" max="100" value="0"></progress>
+</div>
+</div>
+<div id="view-music" style="display:none">
+<div id="music-grid"></div>
+<div id="music-pagination"></div>
 </div>
 </div>
 
@@ -146,10 +163,30 @@ h1{font-size:22px;color:#4ADE80;font-weight:700}
 </div>
 </div>
 
+<div id="music-modal" class="modal-overlay" style="display:none">
+<div class="modal-box">
+<h2>Edit Music</h2>
+<div class="modal-body">
+<label>File</label>
+<input id="mmodal-name" readonly>
+<label>Title</label>
+<input id="mmodal-title" placeholder="Song title" autocomplete="off">
+<label>Artist</label>
+<input id="mmodal-artist" placeholder="Artist name" autocomplete="off">
+<div id="mmodal-links" style="font-size:12px;color:#6B7B8D"></div>
+</div>
+<div class="modal-footer">
+<button id="btn-music-delete">Delete</button>
+<button id="btn-music-cancel">Cancel</button>
+<button id="btn-music-save">Save</button>
+</div>
+</div>
+</div>
+
 <div id="toast"></div>
 
 <script>
-var tags=[],files=[],images=[],page=1,editingUid=null;
+var tags=[],files=[],images=[],music=[],page=1,musicPage=1,editingUid=null,editingFile=null;
 var PP=6;
 
 function esc(s){
@@ -178,6 +215,12 @@ async function loadImages(){
 var r=await fetch('/api/images');
 var d=await r.json();
 images=d.images||[];
+}
+
+async function loadMusic(){
+var r=await fetch('/api/music');
+var d=await r.json();
+music=d.music||[];
 }
 
 function renderGrid(){
@@ -234,6 +277,147 @@ function render(){
 document.getElementById('stats').textContent=tags.length+' tag'+(tags.length!==1?'s':'');
 renderGrid();
 renderPagination();
+}
+
+function formatSize(b){
+return b<1048576?Math.round(b/1024)+' KB':(b/1048576).toFixed(1)+' MB';
+}
+
+function formatDur(s){
+return Math.floor(s/60)+':'+('0'+(s%60)).slice(-2);
+}
+
+function linkedTags(name){
+return tags.filter(function(t){
+return t.file==='music/'+name||t.file==='/music/'+name;
+});
+}
+
+function renderMusicGrid(){
+var g=document.getElementById('music-grid');
+var start=(musicPage-1)*PP;
+var items=music.slice(start,start+PP);
+if(!items.length){
+g.innerHTML='<div class="empty-state"><div class="empty-icon">&#9835;</div><p>No music files</p><p class="empty-hint">Upload audio from the Tags view</p></div>';
+return;
+}
+var h='';
+for(var i=0;i<items.length;i++){
+var m=items[i];
+var nl=linkedTags(m.name).length;
+h+='<div class="tag-card" data-name="'+esc(m.name)+'">'
++'<div class="card-body">'
++'<div class="card-title">'+esc(m.title||m.name)+'</div>'
++'<div class="card-artist">'+esc(m.artist||'Unknown artist')+'</div>'
++'<div class="card-info">'+esc(m.name)+'</div>'
++'<div class="card-info">'+formatDur(m.duration)+' &middot; '+formatSize(m.size)
++' &middot; '+(nl?nl+' tag'+(nl!==1?'s':''):'no tags')+'</div>'
++'</div></div>';
+}
+g.innerHTML=h;
+var cards=g.querySelectorAll('.tag-card');
+for(var j=0;j<cards.length;j++){
+cards[j].addEventListener('click',function(){
+showMusicModal(this.dataset.name);
+});
+}
+}
+
+function renderMusicPagination(){
+var p=document.getElementById('music-pagination');
+var total=Math.ceil(music.length/PP);
+if(total<=1){p.innerHTML='';return;}
+var h='<button '+(musicPage<=1?'disabled':'')+' data-delta="-1">&lsaquo;</button>';
+for(var i=1;i<=total;i++){
+h+='<button class="'+(i===musicPage?'active':'')+'" data-page="'+i+'">'+i+'</button>';
+}
+h+='<button '+(musicPage>=total?'disabled':'')+' data-delta="1">&rsaquo;</button>';
+p.innerHTML=h;
+var btns=p.querySelectorAll('button:not([disabled])');
+for(var j=0;j<btns.length;j++){
+btns[j].addEventListener('click',function(){
+if(this.dataset.page)musicPage=parseInt(this.dataset.page);
+else musicPage+=parseInt(this.dataset.delta);
+renderMusic();
+window.scrollTo({top:0,behavior:'smooth'});
+});
+}
+}
+
+function renderMusic(){
+document.getElementById('stats').textContent=music.length+' file'+(music.length!==1?'s':'');
+renderMusicGrid();
+renderMusicPagination();
+}
+
+function switchView(v){
+document.getElementById('view-tags').style.display=v==='tags'?'block':'none';
+document.getElementById('view-music').style.display=v==='music'?'block':'none';
+document.getElementById('tab-tags').className='tab'+(v==='tags'?' active':'');
+document.getElementById('tab-music').className='tab'+(v==='music'?' active':'');
+if(v==='music')renderMusic();else render();
+}
+
+function showMusicModal(name){
+var m=null;
+for(var i=0;i<music.length;i++){
+if(music[i].name===name){m=music[i];break;}
+}
+if(!m)return;
+editingFile=name;
+document.getElementById('mmodal-name').value=name;
+document.getElementById('mmodal-title').value=m.title||'';
+document.getElementById('mmodal-artist').value=m.artist||'';
+var links=linkedTags(name);
+document.getElementById('mmodal-links').textContent=links.length
+?'Used by: '+links.map(function(t){return (t.title||'Untitled')+' ('+t.uid+')';}).join(', ')
+:'Not linked to any tag';
+document.getElementById('music-modal').style.display='flex';
+}
+
+function hideMusicModal(){
+document.getElementById('music-modal').style.display='none';
+}
+
+async function saveMusicMeta(){
+if(!editingFile)return;
+var btn=document.getElementById('btn-music-save');
+btn.disabled=true;
+btn.textContent='Writing…';
+try{
+var body={name:editingFile,
+title:document.getElementById('mmodal-title').value.trim(),
+artist:document.getElementById('mmodal-artist').value.trim()};
+var r=await fetch('/api/file/meta',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+var d=await r.json();
+if(d.ok){hideMusicModal();await loadMusic();renderMusic();toast('Metadata saved','ok');}
+else{toast(d.error||'Save failed','err');}
+}catch(e){
+toast(e.message||'Save failed','err');
+}finally{
+btn.disabled=false;
+btn.textContent='Save';
+}
+}
+
+async function deleteMusic(){
+if(!editingFile)return;
+var links=linkedTags(editingFile);
+var msg='Delete '+editingFile+'?';
+if(links.length){
+msg+='\n\nThis also removes '+links.length+' linked tag'+(links.length!==1?'s':'')+':\n'
++links.map(function(t){return '- '+(t.title||'Untitled')+' ('+t.uid+')';}).join('\n');
+}
+if(!confirm(msg))return;
+var r=await fetch('/api/file?name='+encodeURIComponent(editingFile),{method:'DELETE'});
+var d=await r.json();
+if(d.ok){
+hideMusicModal();
+await Promise.all([loadMusic(),loadTags(),loadFiles()]);
+renderMusic();
+var n=(d.removed||[]).length;
+toast('Deleted'+(n?' (removed '+n+' tag'+(n!==1?'s':'')+')':''),'ok');
+}else{toast(d.error||'Delete failed','err');}
 }
 
 function showModal(title,uid,file,title_,artist,album,img){
@@ -342,6 +526,17 @@ document.getElementById('modal').addEventListener('click',function(e){
 if(e.target===e.currentTarget)hideModal();
 });
 
+document.getElementById('tab-tags').addEventListener('click',function(){switchView('tags');});
+document.getElementById('tab-music').addEventListener('click',function(){switchView('music');});
+
+document.getElementById('btn-music-save').addEventListener('click',saveMusicMeta);
+document.getElementById('btn-music-cancel').addEventListener('click',hideMusicModal);
+document.getElementById('btn-music-delete').addEventListener('click',deleteMusic);
+
+document.getElementById('music-modal').addEventListener('click',function(e){
+if(e.target===e.currentTarget)hideMusicModal();
+});
+
 document.getElementById('btn-upload').addEventListener('click',function(){
 var p=document.getElementById('upload-panel');
 p.style.display=p.style.display==='none'?'block':'none';
@@ -396,16 +591,22 @@ xhr.send(form);
 
 function pcmToWavBlob(f32,rate){
 var n=f32.length;
-var buf=new ArrayBuffer(44+n*2);
+// 12 RIFF + 24 fmt + 156 canonical LIST INFO + 8 data header = 200.
+// The empty padded INAM/IART fields let the firmware patch metadata
+// in place later instead of rewriting the whole file.
+var buf=new ArrayBuffer(200+n*2);
 var v=new DataView(buf);
 function ws(o,str){for(var i=0;i<str.length;i++)v.setUint8(o+i,str.charCodeAt(i));}
-ws(0,'RIFF');v.setUint32(4,36+n*2,true);ws(8,'WAVE');
+ws(0,'RIFF');v.setUint32(4,192+n*2,true);ws(8,'WAVE');
 ws(12,'fmt ');v.setUint32(16,16,true);
 v.setUint16(20,1,true);v.setUint16(22,1,true);
 v.setUint32(24,rate,true);v.setUint32(28,rate*2,true);
 v.setUint16(32,2,true);v.setUint16(34,16,true);
-ws(36,'data');v.setUint32(40,n*2,true);
-var off=44;
+ws(36,'LIST');v.setUint32(40,148,true);ws(44,'INFO');
+ws(48,'INAM');v.setUint32(52,64,true);
+ws(120,'IART');v.setUint32(124,64,true);
+ws(192,'data');v.setUint32(196,n*2,true);
+var off=200;
 for(var i=0;i<n;i++){
 var x=f32[i];
 if(x<-1)x=-1;else if(x>1)x=1;
@@ -622,7 +823,7 @@ toast('Album art skipped: '+(e.message||'unknown'),'err');
 setUploadStatus('',null);
 toast('Uploaded '+audioName+(artName?' + '+artName:''),'ok');
 inp.value='';
-await Promise.all([loadFiles(),loadImages()]);
+await Promise.all([loadFiles(),loadImages(),loadMusic()]);
 }catch(e){
 setUploadStatus('',null);
 toast(e.message||'Upload failed','err');
@@ -670,7 +871,7 @@ function(){loadImages().then(function(){inp.value='';});});
 });
 
 (async function(){
-await Promise.all([loadTags(),loadFiles(),loadImages()]);
+await Promise.all([loadTags(),loadFiles(),loadImages(),loadMusic()]);
 render();
 })();
 </script>
@@ -875,6 +1076,262 @@ static void handleApiTagDelete() {
 }
 
 // ================================================================
+//  Music file management
+// ================================================================
+
+// Shared scratch buffer: WAV header/meta scans + slow-path rewrite streaming.
+static uint8_t wavScanBuf[4096];
+
+static bool isSafeName(const String &name) {
+  for (size_t i = 0; i < name.length(); i++) {
+    char c = name[i];
+    if (c == '/' || c == '\\' || c == '\0') return false;
+  }
+  return true;
+}
+
+// ================================================================
+//  GET /api/music  →  {"music":[{name,size,duration,title,artist},...]}
+// ================================================================
+
+static void handleApiMusic() {
+  String json = "{\"music\":[";
+  bool first = true;
+  File dir = SD.open("/music");
+  if (dir && dir.isDirectory()) {
+    File f;
+    while ((f = dir.openNextFile())) {
+      if (!f.isDirectory()) {
+        const char *name = f.name();
+        const char *base = strrchr(name, '/');
+        if (base) base++; else base = name;
+
+        size_t n = f.read(wavScanBuf, sizeof(wavScanBuf));
+        WavHeader hdr = {};
+        uint32_t duration = parseWavHeaderBuffer(wavScanBuf, n, hdr) ? wavDurationSeconds(hdr) : 0;
+        WavMeta meta;
+        parseWavMetaBuffer(wavScanBuf, n, meta);
+
+        if (!first) json += ",";
+        first = false;
+        json += "{\"name\":";     json += jsonStr(base);
+        json += ",\"size\":";     json += String((uint32_t)f.size());
+        json += ",\"duration\":"; json += String(duration);
+        json += ",\"title\":";    json += jsonStr(meta.title);
+        json += ",\"artist\":";   json += jsonStr(meta.artist);
+        json += "}";
+      }
+      f.close();
+    }
+    dir.close();
+  }
+  json += "]}";
+  sendJSON(200, json);
+}
+
+// ================================================================
+//  POST /api/file/meta  (JSON body {name,title,artist})
+//  Writes title/artist into the WAV's LIST INFO chunk.
+//  Fast path: canonical chunk present → patch the two fields in place.
+//  Slow path: stream-rewrite the file with a canonical chunk inserted
+//  before the data chunk (one-time cost for legacy files).
+// ================================================================
+
+// Returns nullptr on success, else a short error message.
+static const char *writeWavMeta(const String &path, const char *title, const char *artist) {
+  File f = SD.open(path, FILE_READ);
+  if (!f) return "Cannot open file";
+  size_t headLen = f.read(wavScanBuf, sizeof(wavScanBuf));
+
+  size_t listOff = 0;
+  if (findCanonicalListInfo(wavScanBuf, headLen, &listOff)) {
+    // Fast path: in-place patch.
+    f.close();
+    File w = SD.open(path, "r+");
+    if (w) {
+      size_t titleOff = 0, artistOff = 0;
+      canonicalListFieldOffsets(listOff, &titleOff, &artistOff);
+      uint8_t field[WAV_INFO_CAP];
+      writeCanonicalField(field, title);
+      bool ok = w.seek(titleOff) && w.write(field, WAV_INFO_CAP) == WAV_INFO_CAP;
+      writeCanonicalField(field, artist);
+      ok = ok && w.seek(artistOff) && w.write(field, WAV_INFO_CAP) == WAV_INFO_CAP;
+      w.close();
+      return ok ? nullptr : "Write failed";
+    }
+    // "r+" unsupported/failed → fall through to the slow path.
+    f = SD.open(path, FILE_READ);
+    if (!f) return "Cannot open file";
+    headLen = f.read(wavScanBuf, sizeof(wavScanBuf));
+  }
+
+  WavHeader hdr = {};
+  if (!parseWavHeaderBuffer(wavScanBuf, headLen, hdr)) {
+    f.close();
+    return "Not a valid WAV";
+  }
+  size_t dataChunkStart = hdr.dataOffset - 8;
+
+  String tmpPath = path + ".tmp";
+  if (SD.exists(tmpPath)) SD.remove(tmpPath);
+  File w = SD.open(tmpPath, FILE_WRITE);
+  if (!w) {
+    f.close();
+    return "Cannot create temp file";
+  }
+
+  // RIFF/WAVE header (size patched below), then every front chunk except
+  // an existing LIST INFO (dropped — replaced by the canonical one).
+  size_t written = 0;
+  bool ok = w.write(wavScanBuf, 12) == 12;
+  written += 12;
+  size_t srcPos = 12;
+  while (ok && srcPos + 8 <= dataChunkStart) {
+    uint32_t csize = (uint32_t)wavScanBuf[srcPos + 4] | ((uint32_t)wavScanBuf[srcPos + 5] << 8) |
+                     ((uint32_t)wavScanBuf[srcPos + 6] << 16) | ((uint32_t)wavScanBuf[srcPos + 7] << 24);
+    size_t total = 8 + csize + (csize & 1);
+    if (srcPos + total > dataChunkStart) total = dataChunkStart - srcPos;
+    bool isListInfo = memcmp(wavScanBuf + srcPos, "LIST", 4) == 0 && csize >= 4 &&
+                      memcmp(wavScanBuf + srcPos + 8, "INFO", 4) == 0;
+    if (!isListInfo) {
+      ok = w.write(wavScanBuf + srcPos, total) == total;
+      written += total;
+    }
+    srcPos += total;
+  }
+
+  // Canonical LIST INFO with the new metadata.
+  uint8_t chunk[WAV_CANON_LIST_SIZE];
+  buildCanonicalListInfo(chunk, title, artist);
+  ok = ok && w.write(chunk, sizeof(chunk)) == sizeof(chunk);
+  written += sizeof(chunk);
+
+  // Stream the remainder: data chunk header + payload + pad + trailing chunks.
+  f.seek(dataChunkStart);
+  while (ok) {
+    size_t n = f.read(wavScanBuf, sizeof(wavScanBuf));
+    if (n == 0) break;
+    ok = w.write(wavScanBuf, n) == n;
+    written += n;
+  }
+  f.close();
+
+  // Patch RIFF size from actual bytes written.
+  uint32_t riffSize = (uint32_t)(written - 8);
+  uint8_t sz[4] = { (uint8_t)riffSize, (uint8_t)(riffSize >> 8),
+                    (uint8_t)(riffSize >> 16), (uint8_t)(riffSize >> 24) };
+  ok = ok && w.seek(4) && w.write(sz, 4) == 4;
+  w.close();
+
+  if (!ok) {
+    SD.remove(tmpPath);
+    return "Rewrite failed";
+  }
+  if (!SD.remove(path)) {
+    SD.remove(tmpPath);
+    return "Cannot replace original";
+  }
+  if (!SD.rename(tmpPath, path)) return "Rename failed";
+  return nullptr;
+}
+
+static void handleApiFileMetaPost() {
+  String body = server.arg("plain");
+  if (body.length() == 0) {
+    sendError(400, "Empty request body");
+    return;
+  }
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    sendError(400, "Invalid JSON");
+    return;
+  }
+
+  String name = doc["name"] | "";
+  if (name.length() == 0) {
+    sendError(400, "Missing required field: name");
+    return;
+  }
+  if (!isSafeName(name)) {
+    sendError(403, "Invalid name");
+    return;
+  }
+
+  String path = "/music/" + name;
+  if (!SD.exists(path)) {
+    sendError(404, "File not found");
+    return;
+  }
+
+  const char *werr = writeWavMeta(path, doc["title"] | "", doc["artist"] | "");
+  if (werr) sendError(500, werr);
+  else sendOK();
+}
+
+// ================================================================
+//  DELETE /api/file?name=...  →  delete music file + cascade tags
+// ================================================================
+
+static void handleApiFileDelete() {
+  String name = server.arg("name");
+  if (name.length() == 0) {
+    sendError(400, "Missing name parameter");
+    return;
+  }
+  if (!isSafeName(name)) {
+    sendError(403, "Invalid name");
+    return;
+  }
+
+  String path = "/music/" + name;
+  if (!SD.exists(path)) {
+    sendError(404, "File not found");
+    return;
+  }
+  if (!SD.remove(path)) {
+    sendError(500, "Delete failed");
+    return;
+  }
+
+  // Cascade: drop tag mappings that reference the deleted file. tags.json
+  // stores "music/x.wav"; also match a hand-edited "/music/x.wav".
+  String rel = "music/" + name;
+  String removed = "";
+  bool removedAny = false;
+  bool again = true;
+  while (again) {  // remove one key per pass — can't remove while iterating
+    again = false;
+    for (JsonPair kv : tagDoc.as<JsonObject>()) {
+      const char *file = kv.value()["file"] | "";
+      if (rel == file || (file[0] == '/' && rel == file + 1)) {
+        if (removedAny) removed += ",";
+        removed += jsonStr(kv.key().c_str());
+        removedAny = true;
+        String key = kv.key().c_str();
+        tagDoc.remove(key);
+        again = true;
+        break;
+      }
+    }
+  }
+
+  if (removedAny) {
+    if (SD.exists("/tags.json")) SD.remove("/tags.json");
+    File f = SD.open("/tags.json", FILE_WRITE);
+    if (!f) {
+      sendError(500, "Failed to write tags.json");
+      return;
+    }
+    serializeJson(tagDoc, f);
+    f.close();
+  }
+
+  sendOK(String("\"removed\":[") + removed + "]");
+}
+
+// ================================================================
 //  GET /img?name=...  →  serve BMP image from SD
 // ================================================================
 
@@ -1073,6 +1530,12 @@ void initWebServer() {
   server.on("/api/tag",      HTTP_POST,   handleApiTagPost);
   server.on("/api/tag",      HTTP_DELETE, handleApiTagDelete);
   server.on("/api/tag",      HTTP_OPTIONS, handleOptions);
+  server.on("/api/music",    HTTP_GET,    handleApiMusic);
+  server.on("/api/music",    HTTP_OPTIONS, handleOptions);
+  server.on("/api/file/meta", HTTP_POST,   handleApiFileMetaPost);
+  server.on("/api/file/meta", HTTP_OPTIONS, handleOptions);
+  server.on("/api/file",     HTTP_DELETE, handleApiFileDelete);
+  server.on("/api/file",     HTTP_OPTIONS, handleOptions);
   server.on("/img",          HTTP_GET,    handleImg);
   server.on("/upload",       HTTP_POST,   handleUploadComplete, handleUpload);
 server.on("/upload-img",   HTTP_POST,   handleUploadImgComplete, handleUploadImg);

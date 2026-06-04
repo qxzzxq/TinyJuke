@@ -47,6 +47,68 @@ bool parseWavHeaderBuffer(const uint8_t *data, size_t len, WavHeader &hdr) {
   return false;
 }
 
+static inline void writeLE32(uint8_t *p, uint32_t v) {
+  p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24);
+}
+
+bool findCanonicalListInfo(const uint8_t *data, size_t len, size_t *listOffset) {
+  if (len < 12) return false;
+  if (memcmp(data, "RIFF", 4) != 0) return false;
+  if (memcmp(data + 8, "WAVE", 4) != 0) return false;
+
+  size_t pos = 12;
+  while (pos + 8 <= len) {
+    uint32_t size = readLE32(data + pos + 4);
+    if (memcmp(data + pos, "data", 4) == 0) return false;  // must appear before data
+    if (memcmp(data + pos, "LIST", 4) == 0 &&
+        size == WAV_CANON_LIST_SIZE - 8 &&
+        pos + WAV_CANON_LIST_SIZE <= len &&
+        memcmp(data + pos + 8,  "INFO", 4) == 0 &&
+        memcmp(data + pos + 12, "INAM", 4) == 0 &&
+        readLE32(data + pos + 16) == WAV_INFO_CAP &&
+        memcmp(data + pos + 20 + WAV_INFO_CAP, "IART", 4) == 0 &&
+        readLE32(data + pos + 24 + WAV_INFO_CAP) == WAV_INFO_CAP) {
+      *listOffset = pos;
+      return true;
+    }
+    pos += 8 + size + (size & 1);
+  }
+  return false;
+}
+
+void canonicalListFieldOffsets(size_t listOffset, size_t *titleOff, size_t *artistOff) {
+  *titleOff  = listOffset + 20;
+  *artistOff = listOffset + 28 + WAV_INFO_CAP;
+}
+
+void writeCanonicalField(uint8_t *out, const char *s) {
+  memset(out, 0, WAV_INFO_CAP);
+  if (s) {
+    size_t n = strlen(s);
+    if (n > WAV_INFO_CAP - 1) n = WAV_INFO_CAP - 1;
+    memcpy(out, s, n);
+  }
+}
+
+size_t buildCanonicalListInfo(uint8_t *out, const char *title, const char *artist) {
+  memcpy(out, "LIST", 4);
+  writeLE32(out + 4, WAV_CANON_LIST_SIZE - 8);
+  memcpy(out + 8, "INFO", 4);
+  memcpy(out + 12, "INAM", 4);
+  writeLE32(out + 16, WAV_INFO_CAP);
+  writeCanonicalField(out + 20, title);
+  memcpy(out + 20 + WAV_INFO_CAP, "IART", 4);
+  writeLE32(out + 24 + WAV_INFO_CAP, WAV_INFO_CAP);
+  writeCanonicalField(out + 28 + WAV_INFO_CAP, artist);
+  return WAV_CANON_LIST_SIZE;
+}
+
+uint32_t wavDurationSeconds(const WavHeader &hdr) {
+  uint32_t bytesPerSec = hdr.sampleRate * hdr.channels * (hdr.bitsPerSample / 8);
+  if (bytesPerSec == 0) return 0;
+  return hdr.dataSize / bytesPerSec;
+}
+
 void parseWavMetaBuffer(const uint8_t *data, size_t len, WavMeta &meta) {
   memset(&meta, 0, sizeof(meta));
   if (len < 12) return;
