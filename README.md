@@ -127,6 +127,7 @@ The web interface provides:
 - **Image upload** — manually upload BMP/JPG/PNG album art to `/img/` (`POST /upload-img`)
 - **Album art picker** — choose any image in `/img/` when editing a tag (served via `GET /img?name=...`)
 - **Music management** — the Music tab lists every file in `/music/` with size, duration, and embedded title/artist (`GET /api/music`). Edit metadata (written into the WAV's LIST INFO chunk via `POST /api/file/meta`) or delete a file (`DELETE /api/file?name=...`) — deleting also removes any tags that reference it, after a confirmation listing them. Files uploaded through the web UI carry a fixed-size LIST INFO chunk so metadata edits are instant; older files are rewritten once on first edit (can take ~tens of seconds for long tracks).
+- **Firmware update (OTA)** — the System tab shows the running firmware version and accepts a `.bin` image (`POST /update`). The image is written to the inactive OTA slot with progress on the device screen; on success the device reboots into the new firmware. Build the image with `pio run` and find it at `.pio/build/release/firmware.bin`. Note: after switching to the OTA partition table (v1.6.0), the first flash must be done over USB; there is no automatic rollback if an update misbehaves.
 
 Changes are written to `/tags.json` on the SD card immediately.
 
@@ -197,6 +198,6 @@ All fields except `file` are optional. `img` paths are relative to `/img/` on th
 
 ## Status
 
-Milestone 4 in progress. Added: Bluetooth A2DP sink (speaker) mode with AVRCP metadata display, encoder volume control, sleep-timer + power-save integration, an RFID tag-detected prompt that hands off to jukebox playback, and web-based music management (list / edit WAV metadata / delete with tag cascade).
+Milestone 4 in progress. Added: Bluetooth A2DP sink (speaker) mode with AVRCP metadata display, encoder volume control, sleep-timer + power-save integration, an RFID tag-detected prompt that hands off to jukebox playback, web-based music management (list / edit WAV metadata / delete with tag cascade), and OTA firmware updates from the web UI (16 MB partition table with dual app slots).
 
 Prior milestones: web-based tag management, WAV + image upload, browser-side MP3/M4A/AAC/OGG/FLAC → WAV conversion with embedded-art extraction, runtime volume control, encoder-driven GUI with Brightness / Power Saving / Sleep Timer / Version screens, BMP album art (240×240, scaled in PSRAM), tag hot-swap detection, and amp-touch-noise mitigation via I2S priming.
