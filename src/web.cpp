@@ -1596,7 +1596,7 @@ static void handleOptions() {
 void initWebServer() {
   Serial.printf("Starting web server... (heap %u, largest block %u)\n",
                 (unsigned)ESP.getFreeHeap(),
-                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
   WiFi.mode(WIFI_AP);
   bool apOk = WiFi.softAP(WIFI_SSID, WIFI_PASSWORD);
   if (!apOk) {
@@ -1646,7 +1646,7 @@ void stopWebServer() {
   WiFi.mode(WIFI_OFF);
   Serial.printf("Web server stopped. (heap %u, largest block %u)\n",
                 (unsigned)ESP.getFreeHeap(),
-                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
 }
 
 void handleWebClient() {
