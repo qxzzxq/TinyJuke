@@ -30,7 +30,7 @@ Earlier (Milestone 3): tag hot-swap detection, brightness / power-save / sleep-t
 | 34   | ENC_SW            | Input-only (external pull-up on module)  |
 | 35   | VBAT              | Unused                                   |
 
-MAX98357A config: GAIN → GND (12 dB), SD/Mode → float (mono mix). Volume is software-controlled via encoder (runtime adjustable, persisted to `/volume.cfg` on SD). Brightness is also software-controlled via encoder (persisted to `/brightness.cfg` on SD). Power saving (persisted to `/powersave.cfg`) turns off the display after idle timeout. Audio sleep timer (persisted to `/sleeptimer.cfg`) stops playback after the configured duration.
+MAX98357A config: GAIN → GND (12 dB), SD/Mode → float (mono mix). Volume is software-controlled via encoder (runtime adjustable, persisted to `/volume.cfg` on SD). A separate max-volume setting (persisted to `/maxvolume.cfg`) is a hard software ceiling enforced everywhere volume can be raised — Volume screen, playback overlay, BT encoder, and phone-pushed AVRCP volume; the invariant `volumeLevel <= maxVolumeLevel` is maintained (lowering max pulls volume down, boot load clamps). The Volume screen shows both parameters: rotate adjusts the active one, CLICK toggles Volume/Max Volume, HOLD saves both and returns to the menu. Brightness is also software-controlled via encoder (persisted to `/brightness.cfg` on SD). Power saving (persisted to `/powersave.cfg`) turns off the display after idle timeout. Audio sleep timer (persisted to `/sleeptimer.cfg`) stops playback after the configured duration.
 
 KY-040 encoder: CLK→GPIO36, DT→GPIO5, SW→GPIO34, +→3.3V, GND→GND. GPIO 34 and 36 are input-only but the module's external 10k pull-up resistors make them work.
 
@@ -53,9 +53,10 @@ src/
 ├── tags.h            — TagInfo struct + declarations
 ├── tags.cpp          — sdReady, printHex (Arduino/Serial-coupled)
 ├── tag_utils.cpp     — tagDoc, uidToStr(), lookupTag() (pure, testable on native)
-├── encoder.h/.cpp    — Rotary encoder (ISR quadrature, button state machine, volume/brightness/power-save/sleep-timer save/load)
+├── encoder.h/.cpp    — Rotary encoder (ISR quadrature, button state machine, volume/max-volume/brightness/power-save/sleep-timer save/load)
 ├── encoder_gray.h    — Pure gray-code transition helper used by the encoder ISR (testable on native)
 ├── value_array.h     — Pure helpers for "fixed list of option values" lookups (power-save/sleep-timer)
+├── volume_logic.h    — Pure volume-adjustment policy: volumeAdjust() maintains vol <= maxVol (testable on native)
 ├── timer_logic.h     — Pure timer policy: sleepTimerShouldFire / powerSaveShouldSleep / timerRemainingMs / formatCountdownMMSS
 ├── jukebox_state.h/.cpp — Pure top-level FSM (Waiting / Sleeping + sleepStopped / tagPresent flags) driving loop()'s decisions
 ├── gui.h/.cpp        — Management mode (menu + volume/brightness/powersave/sleeptimer/version/web/bluetooth screens)
@@ -101,7 +102,7 @@ WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, d
 4. `i2sPrime()` — install I2S driver with a default config so BCLK/LRC/DOUT are actively driven; otherwise the MAX98357A picks up touch-coupled noise.
 5. PN532 init with firmware version check + raw-byte diagnostic on failure (currently `while(true) delay(1000)` on failure — known unrecoverable hang).
 6. `nfc.SAMConfig()`
-7. `initEncoder()` — loads saved volume from `/volume.cfg`, attaches ISR interrupts for quadrature decoding
+7. `initEncoder()` — loads saved volume from `/volume.cfg` and max volume from `/maxvolume.cfg` (volume clamped to max), attaches ISR interrupts for quadrature decoding
 8. `loadBrightness()` + `applyBrightness()` — load saved brightness, apply via LEDC PWM
 9. `loadPowerSave()` + `loadSleepTimer()` + `resetActivityTimer()` — load power save and audio sleep timeouts, init activity tracking
 
@@ -136,6 +137,7 @@ WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, d
 │   └── song.wav
 ├── tags.json           # UID → file + metadata mapping (managed by web UI)
 ├── volume.cfg          # Persisted volume level 0–100 (plain text)
+├── maxvolume.cfg       # Persisted max-volume ceiling 0–100 (plain text)
 ├── brightness.cfg      # Persisted brightness level 0–100 (plain text)
 ├── powersave.cfg        # Persisted power save timeout in minutes (0=off, plain text)
 └── sleeptimer.cfg      # Persisted audio sleep timer in minutes (0=off, plain text)
@@ -172,7 +174,7 @@ Board: `lolin_d32_pro`, framework: `arduino`, CPU: 240 MHz, partitions: `partiti
 
 Pure logic (anything not coupled to SD/I2S/Serial/PN532) is covered by Unity tests in `test/test_pure/test_main.cpp`. The test program `#include`s the pure source files directly (`wav_parser.cpp`, `tag_utils.cpp`, `encoder_gray.h`, `value_array.h`) so the native env doesn't need Arduino stubs. When adding a new pure helper, prefer putting it in a header or pure-only `.cpp` so it stays testable.
 
-What's covered: `uidToStr`, `lookupTag`, `parseWavHeaderBuffer`, `parseWavMetaBuffer`, `findCanonicalListInfo`, `canonicalListFieldOffsets`, `buildCanonicalListInfo`, `writeCanonicalField`, `wavDurationSeconds`, `grayStep`, `valueToIndex`, `indexToValue`, `sleepTimerShouldFire`, `powerSaveShouldSleep`, `timerRemainingMs`, `formatCountdownMMSS`, and the **top-level tag/sleep/powersave FSM** (`jukeboxStep`). The FSM tests cover tag arrival, removal debounce, sleep-timer-fired suppression, power-save entry, NFC-suppressed-wake, and a full sleep-timer recovery scenario end-to-end. What's NOT covered (and needs on-target verification): the I2S setup, the SD-backed `playWav` streaming loop, the encoder ISR + button debounce state machine, the management GUI, the web server.
+What's covered: `uidToStr`, `lookupTag`, `parseWavHeaderBuffer`, `parseWavMetaBuffer`, `findCanonicalListInfo`, `canonicalListFieldOffsets`, `buildCanonicalListInfo`, `writeCanonicalField`, `wavDurationSeconds`, `grayStep`, `valueToIndex`, `indexToValue`, `sleepTimerShouldFire`, `powerSaveShouldSleep`, `timerRemainingMs`, `formatCountdownMMSS`, `volumeAdjust`, and the **top-level tag/sleep/powersave FSM** (`jukeboxStep`). The FSM tests cover tag arrival, removal debounce, sleep-timer-fired suppression, power-save entry, NFC-suppressed-wake, and a full sleep-timer recovery scenario end-to-end. What's NOT covered (and needs on-target verification): the I2S setup, the SD-backed `playWav` streaming loop, the encoder ISR + button debounce state machine, the management GUI, the web server.
 
 ### State machine architecture
 

@@ -5,6 +5,7 @@
 #include <SD.h>
 
 int volumeLevel      = VOLUME_DEFAULT;
+int maxVolumeLevel   = MAXVOLUME_DEFAULT;
 int brightnessLevel  = BRIGHTNESS_DEFAULT;
 int powerSaveMinutes = POWERSAVE_DEFAULT;
 int sleepTimerMinutes = SLEEPTIMER_DEFAULT;
@@ -56,6 +57,16 @@ void initEncoder() {
       if (v >= 0 && v <= 100) volumeLevel = v;
     }
   }
+
+  if (SD.exists("/maxvolume.cfg")) {
+    File f = SD.open("/maxvolume.cfg", FILE_READ);
+    if (f) {
+      int v = f.readString().toInt();
+      f.close();
+      if (v >= 0 && v <= 100) maxVolumeLevel = v;
+    }
+  }
+  if (volumeLevel > maxVolumeLevel) volumeLevel = maxVolumeLevel;
 }
 
 int readEncoder() {
@@ -101,6 +112,16 @@ void saveVolume() {
   File f = SD.open("/volume.cfg", FILE_WRITE);
   if (f) {
     f.print(volumeLevel);
+    f.close();
+  }
+}
+
+void saveMaxVolume() {
+  if (!sdReady) return;
+  if (SD.exists("/maxvolume.cfg")) SD.remove("/maxvolume.cfg");
+  File f = SD.open("/maxvolume.cfg", FILE_WRITE);
+  if (f) {
+    f.print(maxVolumeLevel);
     f.close();
   }
 }

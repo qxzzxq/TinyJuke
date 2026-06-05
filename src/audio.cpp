@@ -180,7 +180,7 @@ void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t ta
       int delta = (enc > 0) ? 1 : -1;
       while (steps-- > 0) {
         int next = volumeLevel + delta;
-        if (next < 0 || next > 100) break;
+        if (next < 0 || next > maxVolumeLevel) break;
         volumeLevel = next;
       }
       drawPlaybackVolumeOverlay(volumeLevel);

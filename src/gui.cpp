@@ -4,6 +4,7 @@
 #include "web.h"
 #include "bluetooth.h"
 #include "timer_logic.h"
+#include "volume_logic.h"
 
 // ----------------------------------------------------------------
 //  State
@@ -37,6 +38,7 @@ static bool      active     = false;
 static int       menuSel    = 0;
 static bool      webRunning = false;
 static bool      btRunning  = false;
+static bool      volAdjMax  = false;  // Volume screen: encoder adjusts max volume
 static int       btVolDrawn = -1;
 static bool      btConnDrawn = false;
 
@@ -57,7 +59,7 @@ static void redraw() {
       drawMenuScreen(menuSel);
       break;
     case Screen::VOLUME:
-      drawVolumeScreen(volumeLevel);
+      drawVolumeScreen(volumeLevel, maxVolumeLevel, volAdjMax);
       break;
     case Screen::BRIGHTNESS:
       drawBrightnessScreen(brightnessLevel);
@@ -175,6 +177,7 @@ void guiLoop() {
         return;
       case Screen::VOLUME:
         saveVolume();
+        saveMaxVolume();
         scr = Screen::MENU; menuSel = MI_VOLUME;
         break;
       case Screen::BRIGHTNESS:
@@ -238,7 +241,7 @@ void guiLoop() {
             initBluetoothMode(nfc); btRunning = true; scr = Screen::BLUETOOTH;
             break;
           }
-          case MI_VOLUME:      scr = Screen::VOLUME; break;
+          case MI_VOLUME:      scr = Screen::VOLUME; volAdjMax = false; break;
           case MI_BRIGHTNESS:  scr = Screen::BRIGHTNESS; break;
           case MI_POWERSAVING: scr = Screen::POWERSAVING; break;
           case MI_SLEEPTIMER:  scr = Screen::SLEEPTIMER; break;
@@ -250,24 +253,22 @@ void guiLoop() {
       break;
 
     // ================ VOLUME ================
+    // Rotate adjusts the active parameter, CLICK toggles Volume/Max Volume,
+    // HOLD saves both and returns to the menu.
     case Screen::VOLUME: {
-      int oldLevel = volumeLevel;
+      int  oldLevel  = volumeLevel;
+      int  oldMax    = maxVolumeLevel;
+      bool oldAdjMax = volAdjMax;
 
       for (;;) {
-        if (ev > 0 && ev < ENC_CLICK) {
-          int nv = volumeLevel + ev;
-          volumeLevel = (nv > 100) ? 100 : (nv < 0 ? 0 : nv);
-        } else if (ev < 0) {
-          int nv = volumeLevel + ev;
-          volumeLevel = (nv < 0) ? 0 : (nv > 100 ? 100 : nv);
+        if ((ev > 0 && ev < ENC_CLICK) || ev < 0) {
+          volumeAdjust(volumeLevel, maxVolumeLevel, volAdjMax, ev);
         } else if (ev == ENC_CLICK) {
-          saveVolume();
-          scr = Screen::MENU; menuSel = MI_VOLUME;
-          redraw();
-          break;
+          volAdjMax = !volAdjMax;
         }
         else if (ev == ENC_HOLD) {
           saveVolume();
+          saveMaxVolume();
           scr = Screen::MENU; menuSel = MI_VOLUME;
           redraw();
           break;
@@ -276,8 +277,9 @@ void guiLoop() {
         if (ev == ENC_NONE) break;
       }
 
-      if (volumeLevel != oldLevel)
-        updateVolumeDisplay(volumeLevel);
+      if (scr == Screen::VOLUME &&
+          (volumeLevel != oldLevel || maxVolumeLevel != oldMax || volAdjMax != oldAdjMax))
+        updateVolumeDisplay(volumeLevel, maxVolumeLevel, volAdjMax);
       break;
     }
 
@@ -418,12 +420,9 @@ void guiLoop() {
     case Screen::BLUETOOTH: {
       int oldLevel = volumeLevel;
       for (;;) {
-        if (ev > 0 && ev < ENC_CLICK) {
+        if ((ev > 0 && ev < ENC_CLICK) || ev < 0) {
           int nv = volumeLevel + ev;
-          volumeLevel = (nv > 100) ? 100 : (nv < 0 ? 0 : nv);
-        } else if (ev < 0) {
-          int nv = volumeLevel + ev;
-          volumeLevel = (nv < 0) ? 0 : (nv > 100 ? 100 : nv);
+          volumeLevel = (nv > maxVolumeLevel) ? maxVolumeLevel : (nv < 0 ? 0 : nv);
         } else if (ev == ENC_CLICK) {
           saveVolume();
           break;

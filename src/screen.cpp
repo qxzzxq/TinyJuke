@@ -348,27 +348,70 @@ void drawBrightnessScreen(int level) {
 }
 
 // ================================================================
-//  Volume screen
+//  Volume screen — two sections: Volume + Max Volume (software cap)
 // ================================================================
 
 static int s_volumeDrawn = -1;
+static int s_maxVolDrawn = -1;
+static int s_adjMaxDrawn = -1;
 
-void drawVolumeScreen(int level) {
-  drawHeader("Volume", "back");
+// Section geometry (header occupies y=0..34, hint bar at the bottom)
+static const int VOL_BAR_X = 24, VOL_BAR_W = 192, VOL_BAR_H = 16;
+static const int VOL_LABEL_Y = 56,  VOL_BAR_Y = 78,  VOL_PCT_Y = 102;
+static const int MAX_LABEL_Y = 160, MAX_BAR_Y = 182, MAX_PCT_Y = 206;
 
-  const int barX = 24, barY = 140, barW = 192, barH = 20;
-  gfx.fillRect(barX, barY, barW, barH, C_LINE);
-  int fillW = (barW - 4) * level / 100;
+// Label row: ">" marker + accent color on the section the encoder adjusts.
+static void drawVolumeSectionLabel(const char *text, int y, bool active) {
+  // Clear the label band (size 2 text at y occupies y..y+16)
+  gfx.fillRect(0, y - 4, gfx.width(), 24, C_BG);
+  gfx.setTextSize(2);
+  gfx.setTextColor(active ? C_ACCENT : C_MUTED);
+  if (active) {
+    gfx.setCursor(VOL_BAR_X, y);
+    gfx.print(">");
+  }
+  gfx.setCursor(VOL_BAR_X + 20, y);
+  gfx.print(text);
+}
+
+// prevLevel < 0 = full draw; otherwise incremental fill update.
+static void drawVolumeSectionBar(int barY, int level, int prevLevel, uint16_t fillColor) {
+  int fillW = (VOL_BAR_W - 4) * level / 100;
+  if (prevLevel < 0) {
+    gfx.fillRect(VOL_BAR_X, barY, VOL_BAR_W, VOL_BAR_H, C_LINE);
+  } else {
+    int prevFillW = (VOL_BAR_W - 4) * prevLevel / 100;
+    if (fillW < prevFillW)
+      gfx.fillRect(VOL_BAR_X + 2 + fillW, barY + 2, prevFillW - fillW, VOL_BAR_H - 4, C_LINE);
+  }
   if (fillW > 0)
-    gfx.fillRect(barX + 2, barY + 2, fillW, barH - 4, C_ACCENT);
+    gfx.fillRect(VOL_BAR_X + 2, barY + 2, fillW, VOL_BAR_H - 4, fillColor);
+}
 
+static void drawVolumeSectionPct(int pctY, int level) {
+  // Clear full text area with margin (size 3 at pctY occupies pctY..pctY+24)
+  gfx.fillRect(0, pctY - 8, gfx.width(), 38, C_BG);
   char pct[8];
   snprintf(pct, sizeof(pct), "%d%%", level);
-  centerText(pct, 180, C_TEXT, 3);
+  centerText(pct, pctY, C_TEXT, 3);
+}
 
-  drawHintBar("turn to adjust \267 click to save");
+void drawVolumeScreen(int level, int maxLevel, bool adjustingMax) {
+  drawHeader("Volume", "back");
+
+  drawVolumeSectionLabel("Volume", VOL_LABEL_Y, !adjustingMax);
+  drawVolumeSectionBar(VOL_BAR_Y, level, -1, C_ACCENT);
+  drawVolumeSectionPct(VOL_PCT_Y, level);
+
+  drawVolumeSectionLabel("Max Volume", MAX_LABEL_Y, adjustingMax);
+  drawVolumeSectionBar(MAX_BAR_Y, maxLevel, -1, C_TEXT);
+  drawVolumeSectionPct(MAX_PCT_Y, maxLevel);
+
+  drawHintBar("click to switch \267 hold to save");
 
   s_volumeDrawn = level;
+  s_maxVolDrawn = maxLevel;
+  s_adjMaxDrawn = adjustingMax ? 1 : 0;
 }
 
 // ================================================================
@@ -609,31 +652,23 @@ void updateMenuSelection(int oldSel, int newSel) {
   gfx.print(">");
 }
 
-void updateVolumeDisplay(int level) {
-  const int barX = 24, barY = 140, barW = 192, barH = 20;
-  int fillW = (barW - 4) * level / 100;
-
-  if (s_volumeDrawn >= 0) {
-    int prevFillW = (barW - 4) * s_volumeDrawn / 100;
-    if (fillW < prevFillW) {
-      int clearX = barX + 2 + fillW;
-      int clearW = prevFillW - fillW;
-      gfx.fillRect(clearX, barY + 2, clearW, barH - 4, C_LINE);
-    }
-  } else {
-    gfx.fillRect(barX + 2, barY + 2, barW - 4, barH - 4, C_LINE);
+void updateVolumeDisplay(int level, int maxLevel, bool adjustingMax) {
+  int adj = adjustingMax ? 1 : 0;
+  if (adj != s_adjMaxDrawn) {
+    drawVolumeSectionLabel("Volume", VOL_LABEL_Y, !adjustingMax);
+    drawVolumeSectionLabel("Max Volume", MAX_LABEL_Y, adjustingMax);
+    s_adjMaxDrawn = adj;
   }
-
-  if (fillW > 0)
-    gfx.fillRect(barX + 2, barY + 2, fillW, barH - 4, C_ACCENT);
-
-  // Erase and redraw percentage (text at y=180, size 3 = 24px tall → 180..203)
-  gfx.fillRect(0, 172, gfx.width(), 38, C_BG);
-  char pct[8];
-  snprintf(pct, sizeof(pct), "%d%%", level);
-  centerText(pct, 180, C_TEXT, 3);
-
-  s_volumeDrawn = level;
+  if (level != s_volumeDrawn) {
+    drawVolumeSectionBar(VOL_BAR_Y, level, s_volumeDrawn, C_ACCENT);
+    drawVolumeSectionPct(VOL_PCT_Y, level);
+    s_volumeDrawn = level;
+  }
+  if (maxLevel != s_maxVolDrawn) {
+    drawVolumeSectionBar(MAX_BAR_Y, maxLevel, s_maxVolDrawn, C_TEXT);
+    drawVolumeSectionPct(MAX_PCT_Y, maxLevel);
+    s_maxVolDrawn = maxLevel;
+  }
 }
 
 void updateBrightnessDisplay(int level) {

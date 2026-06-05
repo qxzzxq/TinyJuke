@@ -128,6 +128,7 @@ static void onAvrcVolumeChange(int volume0_127) {
   if (volume0_127 < 0) volume0_127 = 0;
   if (volume0_127 > 127) volume0_127 = 127;
   int newLocal = (volume0_127 * 100) / 127;
+  if (newLocal > maxVolumeLevel) newLocal = maxVolumeLevel;  // software ceiling
   if (newLocal != volumeLevel) {
     volumeLevel = newLocal;
     s_lastVolumeSent = newLocal;   // suppress echo back via set_volume()

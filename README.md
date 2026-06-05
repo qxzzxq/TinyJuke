@@ -81,7 +81,7 @@ The KY-040 module has built-in 10k pull-up resistors. GPIO 34 and 36 are input-o
 - **Click (short press)** — save volume (jukebox) or select/confirm (menu)
 - **Hold (long press, >600ms)** — enter management menu (jukebox) or go back (menu)
 
-The menu provides access to **Web Server**, **Bluetooth**, **Volume**, **Brightness**, **Power Saving**, **Sleep Timer**, **Version** (firmware version + build mode), and **Reboot** (confirmation screen — hold the encoder to reboot, click or rotate to cancel). Brightness uses a white bar (same layout as volume) and is persisted to `/brightness.cfg`. Power Saving turns off the display after a configurable idle period (Off / 5 / 15 / 30 / 60 minutes; the 1-minute option only appears in `DEV_MODE` builds) and is persisted to `/powersave.cfg`. Sleep Timer stops audio playback after the configured duration (Off / 15 / 30 / 60 / 120 minutes; the 1-minute option only appears in `DEV_MODE` builds) and is persisted to `/sleeptimer.cfg`.
+The menu provides access to **Web Server**, **Bluetooth**, **Volume**, **Brightness**, **Power Saving**, **Sleep Timer**, **Version** (firmware version + build mode), and **Reboot** (confirmation screen — hold the encoder to reboot, click or rotate to cancel). The Volume screen has two parameters: **Volume** and **Max Volume**, a software ceiling enforced everywhere volume can be raised (including Bluetooth mode and the phone's volume slider). Rotate to adjust the highlighted parameter, click to switch between them, hold to save both (`/volume.cfg`, `/maxvolume.cfg`); lowering Max Volume below the current volume pulls the volume down with it. Brightness uses a white bar (same layout as volume) and is persisted to `/brightness.cfg`. Power Saving turns off the display after a configurable idle period (Off / 5 / 15 / 30 / 60 minutes; the 1-minute option only appears in `DEV_MODE` builds) and is persisted to `/powersave.cfg`. Sleep Timer stops audio playback after the configured duration (Off / 15 / 30 / 60 / 120 minutes; the 1-minute option only appears in `DEV_MODE` builds) and is persisted to `/sleeptimer.cfg`.
 
 MAX98357A configuration pins:
 - **GAIN** — tie to GND for 12 dB and control volume in software. Leaving the pin floating is unreliable (high-impedance input, noise can produce random gain at power-up).
@@ -142,6 +142,7 @@ Changes are written to `/tags.json` on the SD card immediately.
 │   └── gc_22k.wav
 ├── tags.json                     # UID → file + metadata mapping
 ├── volume.cfg                    # Persisted volume level (plain text, 0–100)
+├── maxvolume.cfg                 # Persisted max-volume ceiling (plain text, 0–100)
 ├── brightness.cfg                # Persisted brightness level (plain text, 0–100)
 ├── powersave.cfg                  # Persisted power save timeout (plain text, minutes)
 └── sleeptimer.cfg                # Persisted audio sleep timer (plain text, minutes)
@@ -198,6 +199,6 @@ All fields except `file` are optional. `img` paths are relative to `/img/` on th
 
 ## Status
 
-Milestone 4 in progress. Added: Bluetooth A2DP sink (speaker) mode with AVRCP metadata display, encoder volume control, sleep-timer + power-save integration, an RFID tag-detected prompt that hands off to jukebox playback, web-based music management (list / edit WAV metadata / delete with tag cascade), and OTA firmware updates from the web UI (16 MB partition table with dual app slots).
+Milestone 4 in progress. Added: Bluetooth A2DP sink (speaker) mode with AVRCP metadata display, encoder volume control, sleep-timer + power-save integration, an RFID tag-detected prompt that hands off to jukebox playback, web-based music management (list / edit WAV metadata / delete with tag cascade), OTA firmware updates from the web UI (16 MB partition table with dual app slots), and a max-volume ceiling configurable from the Volume screen.
 
 Prior milestones: web-based tag management, WAV + image upload, browser-side MP3/M4A/AAC/OGG/FLAC → WAV conversion with embedded-art extraction, runtime volume control, encoder-driven GUI with Brightness / Power Saving / Sleep Timer / Version screens, BMP album art (240×240, scaled in PSRAM), tag hot-swap detection, and amp-touch-noise mitigation via I2S priming.

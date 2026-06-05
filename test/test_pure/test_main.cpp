@@ -15,6 +15,7 @@
 #include "encoder_gray.h"
 #include "value_array.h"
 #include "timer_logic.h"
+#include "volume_logic.h"
 #include "jukebox_state.cpp"
 
 // ----------------------------------------------------------------
@@ -589,6 +590,52 @@ void test_format_countdown_two_hour_max() {
 }
 
 // ----------------------------------------------------------------
+//  Volume adjustment policy (Volume screen: vol + max-volume ceiling)
+// ----------------------------------------------------------------
+
+void test_volume_adjust_normal_steps() {
+  int vol = 50, maxVol = 100;
+  volumeAdjust(vol, maxVol, false, 3);
+  TEST_ASSERT_EQUAL_INT(53, vol);
+  volumeAdjust(vol, maxVol, false, -5);
+  TEST_ASSERT_EQUAL_INT(48, vol);
+  TEST_ASSERT_EQUAL_INT(100, maxVol);  // untouched
+}
+
+void test_volume_adjust_clamps_at_zero_and_max_ceiling() {
+  int vol = 2, maxVol = 100;
+  volumeAdjust(vol, maxVol, false, -10);
+  TEST_ASSERT_EQUAL_INT(0, vol);
+
+  // Volume must stop at the software ceiling, not at 100.
+  vol = 58; maxVol = 60;
+  volumeAdjust(vol, maxVol, false, 10);
+  TEST_ASSERT_EQUAL_INT(60, vol);
+}
+
+void test_volume_adjust_max_clamps_at_bounds() {
+  int vol = 10, maxVol = 95;
+  volumeAdjust(vol, maxVol, true, 20);
+  TEST_ASSERT_EQUAL_INT(100, maxVol);
+  volumeAdjust(vol, maxVol, true, -150);
+  TEST_ASSERT_EQUAL_INT(0, maxVol);
+}
+
+void test_volume_adjust_lowering_max_pulls_volume_down() {
+  // The invariant vol <= maxVol is what makes the ceiling a hard limit:
+  // lowering the max must immediately rein in the current volume.
+  int vol = 80, maxVol = 90;
+  volumeAdjust(vol, maxVol, true, -30);
+  TEST_ASSERT_EQUAL_INT(60, maxVol);
+  TEST_ASSERT_EQUAL_INT(60, vol);
+
+  // Raising the max back does NOT restore the old volume.
+  volumeAdjust(vol, maxVol, true, 30);
+  TEST_ASSERT_EQUAL_INT(90, maxVol);
+  TEST_ASSERT_EQUAL_INT(60, vol);
+}
+
+// ----------------------------------------------------------------
 //  Jukebox FSM — top-level state machine
 // ----------------------------------------------------------------
 
@@ -1002,6 +1049,11 @@ int main() {
   RUN_TEST(test_format_countdown_one_minute);
   RUN_TEST(test_format_countdown_minute_and_seconds);
   RUN_TEST(test_format_countdown_two_hour_max);
+
+  RUN_TEST(test_volume_adjust_normal_steps);
+  RUN_TEST(test_volume_adjust_clamps_at_zero_and_max_ceiling);
+  RUN_TEST(test_volume_adjust_max_clamps_at_bounds);
+  RUN_TEST(test_volume_adjust_lowering_max_pulls_volume_down);
 
   RUN_TEST(test_fsm_initial_state_is_waiting_idle);
   RUN_TEST(test_fsm_tag_arrival_triggers_playback);
