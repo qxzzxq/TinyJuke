@@ -121,7 +121,7 @@ Hold the encoder button (>600ms) to enter the management menu, then select "Web 
 
 The web interface provides:
 - **Tag grid** — browse all registered tags with album art, title, and artist
-- **Add / Edit / Remove tags** — link any NFC tag UID to a WAV file on the SD card with optional metadata
+- **Add / Edit / Remove tags** — link any NFC tag UID to a WAV file on the SD card with optional metadata. In the Add Tag dialog the UID can be typed by hand or filled automatically by tapping the tag on the device's reader (`GET /api/scan`, polled while the dialog is open — the last tag scanned wins; a scanned or typed UID that is already registered shows a warning and disables saving)
 - **Audio upload** — upload WAV/MP3/M4A/AAC/OGG/FLAC. Non-WAV files are decoded and resampled in the browser to 44.1 kHz 16-bit mono WAV, then uploaded to `/music/` (`POST /upload`). The progress bar shows decode → resample → encode → upload stages.
 - **Embedded album art** — when an uploaded MP3 / M4A / FLAC carries embedded cover art (ID3v2 APIC, MP4 `covr`, or FLAC PICTURE block), it is auto-extracted, centre-cropped, scaled to 300×300, written as 24-bit BMP, and uploaded to `/img/` alongside the audio. The resulting `.bmp` shares the audio file's basename so it can be picked in the tag editor.
 - **Image upload** — manually upload BMP/JPG/PNG album art to `/img/` (`POST /upload-img`)
@@ -184,7 +184,7 @@ All fields except `file` are optional. `img` paths are relative to `/img/` on th
 
 **Flash steps:**
 1. Format SD card as FAT32, copy `music/`, `img/` (optional), and `tags.json` to the root
-2. Run `~/.platformio/penv/bin/pio run -t upload` to build and flash over USB
+2. Run `~/.platformio/penv/bin/pio run -t upload` to build and flash over USB. The D32 Pro ships in 4 MB and 16 MB flash variants with identical markings (check with `esptool.py flash_id`) — use `-e release-4mb` for a 4 MB board, since the default 16 MB partition table boot-loops on a 4 MB chip
 3. Run `~/.platformio/penv/bin/pio device monitor` to see boot diagnostics and scanned UIDs at 115200 baud
 
 **Tests:** Pure logic (WAV header/metadata parsing, UID formatting, tag lookup, encoder gray-code, value-array helpers) has host-side Unity tests. Run them with `~/.platformio/penv/bin/pio test -e native` — no board required.

@@ -10,6 +10,7 @@
 #include <esp_heap_caps.h>
 
 static WebServer server(80);
+static PN532 *s_nfc = nullptr;  // set by initWebServer(); used by /api/scan
 
 // ================================================================
 //  HTML Page (complete SPA)
@@ -166,6 +167,7 @@ h1{font-size:22px;color:#4ADE80;font-weight:700}
 <div id="modal-img-placeholder" class="modal-img-placeholder" style="display:none">&#9835;</div>
 <label>Tag UID</label>
 <input id="modal-uid" placeholder="AA:BB:CC:DD" autocomplete="off">
+<div id="modal-scan-status" style="font-size:12px;color:#FACC15;min-height:14px"></div>
 <label>Audio File</label>
 <select id="modal-file"></select>
 <label>Title</label>
@@ -298,8 +300,8 @@ var img=t.img?('<img class="card-img" src="'+imgUrl(t.img)+'" onerror="this.styl
 :'<div class="card-img-placeholder">&#9835;</div>';
 h+='<div class="tag-card" data-uid="'+esc(t.uid)+'">'+img
 +'<div class="card-body"><div class="card-uid">'+esc(t.uid)+'</div>'
-+'<div class="card-title">'+esc(t.title||'Untitled')+'</div>'
-+'<div class="card-artist">'+esc(t.artist||'Unknown artist')+'</div>'
++'<div class="card-title">'+esc(t.title||(t.file||'').split('/').pop())+'</div>'
++'<div class="card-artist">'+(t.artist?esc(t.artist):'&nbsp;')+'</div>'
 +'</div></div>';
 }
 g.innerHTML=h;
@@ -527,12 +529,51 @@ placeholder.style.display='flex';
 }
 
 document.getElementById('btn-remove').style.display=uid?'block':'none';
+document.getElementById('btn-save').disabled=false;
+if(!uid){startScan();}else{stopScan();document.getElementById('modal-scan-status').textContent='';}
 document.getElementById('modal').style.display='flex';
 }
 
 function hideModal(){
+stopScan();
+document.getElementById('modal-scan-status').textContent='';
 document.getElementById('modal').style.display='none';
 }
+
+function checkDupUid(okMsg){
+var st=document.getElementById('modal-scan-status');
+var uid=document.getElementById('modal-uid').value.trim().toUpperCase();
+var known=null;
+for(var i=0;i<tags.length;i++){if(tags[i].uid===uid){known=tags[i];break;}}
+document.getElementById('btn-save').disabled=!!known;
+if(known){
+st.textContent='Already registered: '+(known.title||(known.file||'').split('/').pop());
+st.style.color='#F87171';
+}else{
+st.textContent=okMsg;
+st.style.color='#FACC15';
+}
+}
+
+var scanTimer=null,lastScanUid=null;
+function startScan(){
+stopScan();
+lastScanUid=null;
+checkDupUid('...or tap a tag on the reader');
+scanTimer=setInterval(async function(){
+try{
+var r=await fetch('/api/scan');
+if(!r.ok)return;
+var d=await r.json();
+if(d&&d.ok&&d.uid&&d.uid!==lastScanUid){
+lastScanUid=d.uid;
+document.getElementById('modal-uid').value=d.uid;
+checkDupUid('Scanned: '+d.uid);
+}
+}catch(e){/* AP dropped or device left web screen - keep polling */}
+},500);
+}
+function stopScan(){if(scanTimer){clearInterval(scanTimer);scanTimer=null;}}
 
 async function saveTag(){
 var uid=document.getElementById('modal-uid').value.trim().toUpperCase();
@@ -584,6 +625,7 @@ showModal('Add Tag','','','','','','');
 
 document.getElementById('btn-save').addEventListener('click',saveTag);
 document.getElementById('btn-cancel').addEventListener('click',hideModal);
+document.getElementById('modal-uid').addEventListener('input',function(){checkDupUid('...or tap a tag on the reader');});
 document.getElementById('btn-remove').addEventListener('click',removeTag);
 
 document.getElementById('modal').addEventListener('click',function(e){
@@ -1475,6 +1517,28 @@ static void handleApiVersion() {
 }
 
 // ================================================================
+//  GET /api/scan  →  {"ok":true,"uid":"AA:BB:..."} when a tag is on
+//  the reader, else {"ok":true,"uid":null}. On-demand single-shot
+//  read, no background state — only a tag physically present during
+//  the call is reported. Safe: the GUI loop owns the PN532 while on
+//  the WEB screen (main.cpp short-circuits everything else).
+// ================================================================
+
+static void handleApiScan() {
+  if (!s_nfc) { sendJSON(200, "{\"ok\":true,\"uid\":null}"); return; }
+  uint8_t uid[10] = {0};
+  uint8_t uidLen  = 0;
+  bool found = s_nfc->readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLen, 50);
+  if (found && uidLen > 0 && uidLen <= 10) {
+    char buf[32];
+    uidToStr(uid, uidLen, buf);
+    sendJSON(200, String("{\"ok\":true,\"uid\":") + jsonStr(buf) + "}");
+  } else {
+    sendJSON(200, "{\"ok\":true,\"uid\":null}");
+  }
+}
+
+// ================================================================
 //  POST /update?size=...  →  OTA firmware upload (multipart .bin)
 //  Writes into the inactive OTA slot via Update.h; on success the
 //  response is sent and the device reboots into the new firmware.
@@ -1778,7 +1842,8 @@ static void handleOptions() {
 //  Public API
 // ================================================================
 
-void initWebServer() {
+void initWebServer(PN532 &nfc) {
+  s_nfc = &nfc;
   Serial.printf("Starting web server... (heap %u, largest block %u)\n",
                 (unsigned)ESP.getFreeHeap(),
                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
@@ -1818,6 +1883,7 @@ void initWebServer() {
     server.on("/api/file",     HTTP_DELETE, handleApiFileDelete);
     server.on("/api/file",     HTTP_OPTIONS, handleOptions);
     server.on("/api/version",  HTTP_GET,    handleApiVersion);
+    server.on("/api/scan",     HTTP_GET,    handleApiScan);
     server.on("/img",          HTTP_GET,    handleImg);
     server.on("/upload",       HTTP_POST,   handleUploadComplete, handleUpload);
     server.on("/upload-img",   HTTP_POST,   handleUploadImgComplete, handleUploadImg);

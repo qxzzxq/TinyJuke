@@ -2,7 +2,9 @@
 
 #include "config.h"
 
-void initWebServer();
+#include <PN532.h>
+
+void initWebServer(PN532 &nfc);
 void stopWebServer();
 void handleWebClient();
 int getWebConnectionCount();
