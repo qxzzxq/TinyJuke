@@ -124,12 +124,23 @@ static void onStreamData(const uint8_t * /*data*/, uint32_t len) {
 
 // AVRCP "absolute volume" change pushed by the peer (e.g. user moves the
 // phone's BT slider). The lib reports the new value in the 0..127 range.
+//
+// Note: by the time this runs, the library has ALREADY applied the phone's
+// volume to the audio path (volume_set_by_controller calls
+// volume_control()->set_volume before this callback). Clamping volumeLevel
+// alone would only fix the display, so a push past the cap invalidates
+// s_lastVolumeSent to force handleBluetoothLoop to re-push the clamped
+// value — re-applying it to the stack and AVRCP-notifying the phone, whose
+// slider snaps back to the cap. Convergent: the clamped value round-trips
+// at/below the cap and is then suppressed as a no-change.
 static void onAvrcVolumeChange(int volume0_127) {
   if (volume0_127 < 0) volume0_127 = 0;
   if (volume0_127 > 127) volume0_127 = 127;
   int newLocal = (volume0_127 * 100) / 127;
-  if (newLocal > maxVolumeLevel) newLocal = maxVolumeLevel;  // software ceiling
-  if (newLocal != volumeLevel) {
+  if (newLocal > maxVolumeLevel) {
+    volumeLevel = maxVolumeLevel;
+    s_lastVolumeSent = -1;         // force re-push of the clamped volume
+  } else if (newLocal != volumeLevel) {
     volumeLevel = newLocal;
     s_lastVolumeSent = newLocal;   // suppress echo back via set_volume()
   }
