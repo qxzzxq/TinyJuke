@@ -300,8 +300,8 @@ var img=t.img?('<img class="card-img" src="'+imgUrl(t.img)+'" onerror="this.styl
 :'<div class="card-img-placeholder">&#9835;</div>';
 h+='<div class="tag-card" data-uid="'+esc(t.uid)+'">'+img
 +'<div class="card-body"><div class="card-uid">'+esc(t.uid)+'</div>'
-+'<div class="card-title">'+esc(t.title||'Untitled')+'</div>'
-+'<div class="card-artist">'+esc(t.artist||'Unknown artist')+'</div>'
++'<div class="card-title">'+esc(t.title||(t.file||'').split('/').pop())+'</div>'
++'<div class="card-artist">'+(t.artist?esc(t.artist):'&nbsp;')+'</div>'
 +'</div></div>';
 }
 g.innerHTML=h;
@@ -529,6 +529,7 @@ placeholder.style.display='flex';
 }
 
 document.getElementById('btn-remove').style.display=uid?'block':'none';
+document.getElementById('btn-save').disabled=false;
 if(!uid){startScan();}else{stopScan();document.getElementById('modal-scan-status').textContent='';}
 document.getElementById('modal').style.display='flex';
 }
@@ -539,13 +540,26 @@ document.getElementById('modal-scan-status').textContent='';
 document.getElementById('modal').style.display='none';
 }
 
+function checkDupUid(okMsg){
+var st=document.getElementById('modal-scan-status');
+var uid=document.getElementById('modal-uid').value.trim().toUpperCase();
+var known=null;
+for(var i=0;i<tags.length;i++){if(tags[i].uid===uid){known=tags[i];break;}}
+document.getElementById('btn-save').disabled=!!known;
+if(known){
+st.textContent='Already registered: '+(known.title||(known.file||'').split('/').pop());
+st.style.color='#F87171';
+}else{
+st.textContent=okMsg;
+st.style.color='#FACC15';
+}
+}
+
 var scanTimer=null,lastScanUid=null;
 function startScan(){
 stopScan();
 lastScanUid=null;
-var st=document.getElementById('modal-scan-status');
-st.textContent='...or tap a tag on the reader';
-st.style.color='#FACC15';
+checkDupUid('...or tap a tag on the reader');
 scanTimer=setInterval(async function(){
 try{
 var r=await fetch('/api/scan');
@@ -554,16 +568,7 @@ var d=await r.json();
 if(d&&d.ok&&d.uid&&d.uid!==lastScanUid){
 lastScanUid=d.uid;
 document.getElementById('modal-uid').value=d.uid;
-var known=null;
-for(var i=0;i<tags.length;i++){if(tags[i].uid===d.uid){known=tags[i];break;}}
-var st=document.getElementById('modal-scan-status');
-if(known){
-st.textContent='Already registered: '+(known.title||known.file)+' - saving overwrites it';
-st.style.color='#F87171';
-}else{
-st.textContent='Scanned: '+d.uid;
-st.style.color='#FACC15';
-}
+checkDupUid('Scanned: '+d.uid);
 }
 }catch(e){/* AP dropped or device left web screen - keep polling */}
 },500);
@@ -620,6 +625,7 @@ showModal('Add Tag','','','','','','');
 
 document.getElementById('btn-save').addEventListener('click',saveTag);
 document.getElementById('btn-cancel').addEventListener('click',hideModal);
+document.getElementById('modal-uid').addEventListener('input',function(){checkDupUid('...or tap a tag on the reader');});
 document.getElementById('btn-remove').addEventListener('click',removeTag);
 
 document.getElementById('modal').addEventListener('click',function(e){
