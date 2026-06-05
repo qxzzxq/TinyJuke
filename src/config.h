@@ -72,7 +72,7 @@
 #endif
 
 // --- Version ---
-#define VERSION_STRING       "v1.8.0"
+#define VERSION_STRING       "v1.8.1"
 
 // --- Menu ---
 #define MENU_ITEM_COUNT      8

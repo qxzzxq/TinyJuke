@@ -555,16 +555,18 @@ st.style.color='#FACC15';
 }
 }
 
-var scanTimer=null,lastScanUid=null;
+var scanTimer=null,lastScanUid=null,scanGen=0;
 function startScan(){
 stopScan();
 lastScanUid=null;
 checkDupUid('...or tap a tag on the reader');
+var gen=scanGen;
 scanTimer=setInterval(async function(){
 try{
 var r=await fetch('/api/scan');
 if(!r.ok)return;
 var d=await r.json();
+if(gen!==scanGen)return;/* stale response - scan stopped/restarted while in flight */
 if(d&&d.ok&&d.uid&&d.uid!==lastScanUid){
 lastScanUid=d.uid;
 document.getElementById('modal-uid').value=d.uid;
@@ -573,7 +575,7 @@ checkDupUid('Scanned: '+d.uid);
 }catch(e){/* AP dropped or device left web screen - keep polling */}
 },500);
 }
-function stopScan(){if(scanTimer){clearInterval(scanTimer);scanTimer=null;}}
+function stopScan(){scanGen++;if(scanTimer){clearInterval(scanTimer);scanTimer=null;}}
 
 async function saveTag(){
 var uid=document.getElementById('modal-uid').value.trim().toUpperCase();
