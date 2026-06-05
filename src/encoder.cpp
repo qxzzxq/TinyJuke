@@ -66,7 +66,6 @@ void initEncoder() {
       if (v >= 0 && v <= 100) maxVolumeLevel = v;
     }
   }
-  if (volumeLevel > maxVolumeLevel) volumeLevel = maxVolumeLevel;
 }
 
 int readEncoder() {

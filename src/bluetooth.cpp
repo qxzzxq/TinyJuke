@@ -197,6 +197,10 @@ void initBluetoothMode(PN532 &nfc) {
   }
 #endif
 
+  // BT treats max-volume as a clamp (jukebox mode lets volumeLevel exceed it
+  // as a scale factor) — rein the volume in before pushing it to the stack.
+  if (volumeLevel > maxVolumeLevel) volumeLevel = maxVolumeLevel;
+
   // Push our current local volume to the library + peer (AVRCP notify).
   uint8_t btVol = (uint8_t)((volumeLevel * 127) / 100);
   a2dp_sink.set_volume(btVol);

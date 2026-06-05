@@ -590,7 +590,7 @@ void test_format_countdown_two_hour_max() {
 }
 
 // ----------------------------------------------------------------
-//  Volume adjustment policy (Volume screen: vol + max-volume ceiling)
+//  Volume policy (Volume screen: vol + max-volume scale factor)
 // ----------------------------------------------------------------
 
 void test_volume_adjust_normal_steps() {
@@ -602,37 +602,42 @@ void test_volume_adjust_normal_steps() {
   TEST_ASSERT_EQUAL_INT(100, maxVol);  // untouched
 }
 
-void test_volume_adjust_clamps_at_zero_and_max_ceiling() {
-  int vol = 2, maxVol = 100;
-  volumeAdjust(vol, maxVol, false, -10);
-  TEST_ASSERT_EQUAL_INT(0, vol);
-
-  // Volume must stop at the software ceiling, not at 100.
-  vol = 58; maxVol = 60;
+void test_volume_adjust_params_are_independent() {
+  // Max-volume is a scale factor, not a ceiling on the bar: vol keeps its
+  // full 0..100 range regardless of maxVol, and adjusting one never moves
+  // the other.
+  int vol = 58, maxVol = 60;
   volumeAdjust(vol, maxVol, false, 10);
-  TEST_ASSERT_EQUAL_INT(60, vol);
+  TEST_ASSERT_EQUAL_INT(68, vol);
+
+  vol = 80; maxVol = 90;
+  volumeAdjust(vol, maxVol, true, -50);
+  TEST_ASSERT_EQUAL_INT(40, maxVol);
+  TEST_ASSERT_EQUAL_INT(80, vol);  // not pulled down
 }
 
-void test_volume_adjust_max_clamps_at_bounds() {
-  int vol = 10, maxVol = 95;
+void test_volume_adjust_clamps_both_params_at_bounds() {
+  int vol = 2, maxVol = 95;
+  volumeAdjust(vol, maxVol, false, -10);
+  TEST_ASSERT_EQUAL_INT(0, vol);
+  volumeAdjust(vol, maxVol, false, 150);
+  TEST_ASSERT_EQUAL_INT(100, vol);
+
   volumeAdjust(vol, maxVol, true, 20);
   TEST_ASSERT_EQUAL_INT(100, maxVol);
   volumeAdjust(vol, maxVol, true, -150);
   TEST_ASSERT_EQUAL_INT(0, maxVol);
 }
 
-void test_volume_adjust_lowering_max_pulls_volume_down() {
-  // The invariant vol <= maxVol is what makes the ceiling a hard limit:
-  // lowering the max must immediately rein in the current volume.
-  int vol = 80, maxVol = 90;
-  volumeAdjust(vol, maxVol, true, -30);
-  TEST_ASSERT_EQUAL_INT(60, maxVol);
-  TEST_ASSERT_EQUAL_INT(60, vol);
-
-  // Raising the max back does NOT restore the old volume.
-  volumeAdjust(vol, maxVol, true, 30);
-  TEST_ASSERT_EQUAL_INT(90, maxVol);
-  TEST_ASSERT_EQUAL_INT(60, vol);
+void test_effective_volume_scales_by_max() {
+  // WAV playback loudness is the product of the two percentages — this is
+  // what makes max-volume a cap even though the bar still reads 0..100.
+  TEST_ASSERT_EQUAL_INT(100, effectiveVolume(100, 100));
+  TEST_ASSERT_EQUAL_INT(50,  effectiveVolume(100, 50));
+  TEST_ASSERT_EQUAL_INT(25,  effectiveVolume(50, 50));
+  TEST_ASSERT_EQUAL_INT(0,   effectiveVolume(0, 100));
+  TEST_ASSERT_EQUAL_INT(0,   effectiveVolume(100, 0));
+  TEST_ASSERT_EQUAL_INT(49,  effectiveVolume(99, 50));  // truncates
 }
 
 // ----------------------------------------------------------------
@@ -1051,9 +1056,9 @@ int main() {
   RUN_TEST(test_format_countdown_two_hour_max);
 
   RUN_TEST(test_volume_adjust_normal_steps);
-  RUN_TEST(test_volume_adjust_clamps_at_zero_and_max_ceiling);
-  RUN_TEST(test_volume_adjust_max_clamps_at_bounds);
-  RUN_TEST(test_volume_adjust_lowering_max_pulls_volume_down);
+  RUN_TEST(test_volume_adjust_params_are_independent);
+  RUN_TEST(test_volume_adjust_clamps_both_params_at_bounds);
+  RUN_TEST(test_effective_volume_scales_by_max);
 
   RUN_TEST(test_fsm_initial_state_is_waiting_idle);
   RUN_TEST(test_fsm_tag_arrival_triggers_playback);
