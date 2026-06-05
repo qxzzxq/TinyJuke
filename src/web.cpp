@@ -543,7 +543,9 @@ var scanTimer=null,lastScanUid=null;
 function startScan(){
 stopScan();
 lastScanUid=null;
-document.getElementById('modal-scan-status').textContent='...or tap a tag on the reader';
+var st=document.getElementById('modal-scan-status');
+st.textContent='...or tap a tag on the reader';
+st.style.color='#FACC15';
 scanTimer=setInterval(async function(){
 try{
 var r=await fetch('/api/scan');
@@ -552,7 +554,16 @@ var d=await r.json();
 if(d&&d.ok&&d.uid&&d.uid!==lastScanUid){
 lastScanUid=d.uid;
 document.getElementById('modal-uid').value=d.uid;
-document.getElementById('modal-scan-status').textContent='Scanned: '+d.uid;
+var known=null;
+for(var i=0;i<tags.length;i++){if(tags[i].uid===d.uid){known=tags[i];break;}}
+var st=document.getElementById('modal-scan-status');
+if(known){
+st.textContent='Already registered: '+(known.title||known.file)+' - saving overwrites it';
+st.style.color='#F87171';
+}else{
+st.textContent='Scanned: '+d.uid;
+st.style.color='#FACC15';
+}
 }
 }catch(e){/* AP dropped or device left web screen - keep polling */}
 },500);

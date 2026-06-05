@@ -121,7 +121,7 @@ Hold the encoder button (>600ms) to enter the management menu, then select "Web 
 
 The web interface provides:
 - **Tag grid** — browse all registered tags with album art, title, and artist
-- **Add / Edit / Remove tags** — link any NFC tag UID to a WAV file on the SD card with optional metadata. In the Add Tag dialog the UID can be typed by hand or filled automatically by tapping the tag on the device's reader (`GET /api/scan`, polled while the dialog is open — the last tag scanned wins)
+- **Add / Edit / Remove tags** — link any NFC tag UID to a WAV file on the SD card with optional metadata. In the Add Tag dialog the UID can be typed by hand or filled automatically by tapping the tag on the device's reader (`GET /api/scan`, polled while the dialog is open — the last tag scanned wins, and a warning is shown if the tag is already registered)
 - **Audio upload** — upload WAV/MP3/M4A/AAC/OGG/FLAC. Non-WAV files are decoded and resampled in the browser to 44.1 kHz 16-bit mono WAV, then uploaded to `/music/` (`POST /upload`). The progress bar shows decode → resample → encode → upload stages.
 - **Embedded album art** — when an uploaded MP3 / M4A / FLAC carries embedded cover art (ID3v2 APIC, MP4 `covr`, or FLAC PICTURE block), it is auto-extracted, centre-cropped, scaled to 300×300, written as 24-bit BMP, and uploaded to `/img/` alongside the audio. The resulting `.bmp` shares the audio file's basename so it can be picked in the tag editor.
 - **Image upload** — manually upload BMP/JPG/PNG album art to `/img/` (`POST /upload-img`)
