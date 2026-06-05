@@ -17,6 +17,7 @@
 // Runtime volume 0–100, set by encoder ISR, read by playWav() for scaling.
 // Loaded from /volume.cfg at boot, saved on change.
 extern int volumeLevel;
+extern int maxVolumeLevel;   // software ceiling: volumeLevel <= maxVolumeLevel
 extern int brightnessLevel;
 extern int powerSaveMinutes;
 extern int sleepTimerMinutes;
@@ -24,6 +25,7 @@ extern int sleepTimerMinutes;
 void initEncoder();
 int  readEncoder();      // returns ENC_* event, clears after read
 void saveVolume();       // persist volumeLevel to SD card
+void saveMaxVolume();    // persist maxVolumeLevel to SD card
 void loadBrightness();   // read /brightness.cfg into brightnessLevel
 void saveBrightness();   // persist brightnessLevel to SD card
 void applyBrightness();  // write brightnessLevel to LEDC PWM

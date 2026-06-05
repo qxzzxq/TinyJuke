@@ -15,7 +15,7 @@ void drawSDErrorScreen();
 
 // GUI screens
 void drawMenuScreen(int selected);
-void drawVolumeScreen(int level);
+void drawVolumeScreen(int level, int maxLevel, bool adjustingMax);
 void drawBrightnessScreen(int level);
 void drawPowerSaveScreen(int minutes);
 void drawSleepTimerScreen(int minutes);
@@ -37,7 +37,7 @@ void updateSleepTimerCountdown(unsigned long remainingMs);
 
 // Incremental updates — only redraw changed items (no flicker)
 void updateMenuSelection(int oldSel, int newSel);
-void updateVolumeDisplay(int level);
+void updateVolumeDisplay(int level, int maxLevel, bool adjustingMax);
 void updateBrightnessDisplay(int level);
 void updatePowerSaveDisplay(int minutes);
 void updateSleepTimerDisplay(int minutes);

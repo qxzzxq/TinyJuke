@@ -43,6 +43,7 @@
 // --- Audio ---
 #define VOLUME_DEFAULT 25   // 0–100, default on boot
 #define VOLUME_MAX     100
+#define MAXVOLUME_DEFAULT 100  // software ceiling on volume, 0–100
 
 // --- Brightness ---
 #define BRIGHTNESS_DEFAULT   100
@@ -71,7 +72,7 @@
 #endif
 
 // --- Version ---
-#define VERSION_STRING       "v1.7.0"
+#define VERSION_STRING       "v1.8.0"
 
 // --- Menu ---
 #define MENU_ITEM_COUNT      8

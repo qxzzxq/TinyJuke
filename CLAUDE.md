@@ -30,7 +30,7 @@ Earlier (Milestone 3): tag hot-swap detection, brightness / power-save / sleep-t
 | 34   | ENC_SW            | Input-only (external pull-up on module)  |
 | 35   | VBAT              | Unused                                   |
 
-MAX98357A config: GAIN → GND (12 dB), SD/Mode → float (mono mix). Volume is software-controlled via encoder (runtime adjustable, persisted to `/volume.cfg` on SD). Brightness is also software-controlled via encoder (persisted to `/brightness.cfg` on SD). Power saving (persisted to `/powersave.cfg`) turns off the display after idle timeout. Audio sleep timer (persisted to `/sleeptimer.cfg`) stops playback after the configured duration.
+MAX98357A config: GAIN → GND (12 dB), SD/Mode → float (mono mix). Volume is software-controlled via encoder (runtime adjustable, persisted to `/volume.cfg` on SD). A separate max-volume setting (persisted to `/maxvolume.cfg`) caps loudness with mode-dependent semantics: in jukebox (WAV) playback it is a **scale factor** — the volume bar keeps its full 0–100 range and the effective output level is `effectiveVolume(vol, maxVol) = vol × maxVol / 100`; in Bluetooth mode it is a **clamp** — `volumeLevel` is limited to `maxVolumeLevel` on BT entry, encoder turns, and phone-pushed AVRCP volume (the value handed to the A2DP stack is echoed to the phone's slider, so scaling there would feedback-fight the phone). The Volume screen shows both parameters: rotate adjusts the active one, CLICK toggles Volume/Max Volume, HOLD saves both and returns to the menu. Brightness is also software-controlled via encoder (persisted to `/brightness.cfg` on SD). Power saving (persisted to `/powersave.cfg`) turns off the display after idle timeout. Audio sleep timer (persisted to `/sleeptimer.cfg`) stops playback after the configured duration.
 
 KY-040 encoder: CLK→GPIO36, DT→GPIO5, SW→GPIO34, +→3.3V, GND→GND. GPIO 34 and 36 are input-only but the module's external 10k pull-up resistors make them work.
 
@@ -53,9 +53,10 @@ src/
 ├── tags.h            — TagInfo struct + declarations
 ├── tags.cpp          — sdReady, printHex (Arduino/Serial-coupled)
 ├── tag_utils.cpp     — tagDoc, uidToStr(), lookupTag() (pure, testable on native)
-├── encoder.h/.cpp    — Rotary encoder (ISR quadrature, button state machine, volume/brightness/power-save/sleep-timer save/load)
+├── encoder.h/.cpp    — Rotary encoder (ISR quadrature, button state machine, volume/max-volume/brightness/power-save/sleep-timer save/load)
 ├── encoder_gray.h    — Pure gray-code transition helper used by the encoder ISR (testable on native)
 ├── value_array.h     — Pure helpers for "fixed list of option values" lookups (power-save/sleep-timer)
+├── volume_logic.h    — Pure volume policy: volumeAdjust() (independent 0–100 params) + effectiveVolume() scale factor (testable on native)
 ├── timer_logic.h     — Pure timer policy: sleepTimerShouldFire / powerSaveShouldSleep / timerRemainingMs / formatCountdownMMSS
 ├── jukebox_state.h/.cpp — Pure top-level FSM (Waiting / Sleeping + sleepStopped / tagPresent flags) driving loop()'s decisions
 ├── gui.h/.cpp        — Management mode (menu + volume/brightness/powersave/sleeptimer/version/web/bluetooth screens)
@@ -101,7 +102,7 @@ WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, d
 4. `i2sPrime()` — install I2S driver with a default config so BCLK/LRC/DOUT are actively driven; otherwise the MAX98357A picks up touch-coupled noise.
 5. PN532 init with firmware version check + raw-byte diagnostic on failure (currently `while(true) delay(1000)` on failure — known unrecoverable hang).
 6. `nfc.SAMConfig()`
-7. `initEncoder()` — loads saved volume from `/volume.cfg`, attaches ISR interrupts for quadrature decoding
+7. `initEncoder()` — loads saved volume from `/volume.cfg` and max volume from `/maxvolume.cfg`, attaches ISR interrupts for quadrature decoding
 8. `loadBrightness()` + `applyBrightness()` — load saved brightness, apply via LEDC PWM
 9. `loadPowerSave()` + `loadSleepTimer()` + `resetActivityTimer()` — load power save and audio sleep timeouts, init activity tracking
 
@@ -119,7 +120,7 @@ WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, d
 **playWav() flow:**
 1. Open WAV file via `SD.open()`, parse header (RIFF/fmt/data chunks; `data` chunk must lie within first 4 KB of file)
 2. Configure I2S to match file's sample rate / bits / channels (16-bit and 24-bit nominally supported; **24-bit volume scaling and 24→32-bit unpacking are not implemented** — 24-bit playback is currently broken)
-3. Stream PCM in 2 KB chunks: `f.read()` → volume-scale 16-bit samples (float) → mono-to-stereo duplication → `i2s_write()`. `remaining` is decremented by `bytesWritten` (mono-adjusted) so partial DMA writes don't drop data.
+3. Stream PCM in 2 KB chunks: `f.read()` → volume-scale 16-bit samples (float, `effectiveVolume(volumeLevel, maxVolumeLevel)`) → mono-to-stereo duplication → `i2s_write()`. `remaining` is decremented by `bytesWritten` (mono-adjusted) so partial DMA writes don't drop data.
 4. Per-chunk: check encoder for volume changes (draws bottom-overlay bar; auto-saves volume after 5s idle), update sleep-timer countdown each second, poll NFC every ~150ms (3 consecutive misses → stop; different UID → stop for tag swap)
 5. Sleep timer: when `sleepTimerMinutes > 0` and `audioStartTime + sleepTimerMinutes` has elapsed, persist `sleepTimerMinutes = 0`, set `sleepTimerFired`, and stop.
 6. Teardown I2S on exit (zero DMA, stop, uninstall driver — `i2sPrime()` will be needed again before next playback to keep amp pins driven; `i2sInit()` does this implicitly).
@@ -136,6 +137,7 @@ WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, d
 │   └── song.wav
 ├── tags.json           # UID → file + metadata mapping (managed by web UI)
 ├── volume.cfg          # Persisted volume level 0–100 (plain text)
+├── maxvolume.cfg       # Persisted max-volume ceiling 0–100 (plain text)
 ├── brightness.cfg      # Persisted brightness level 0–100 (plain text)
 ├── powersave.cfg        # Persisted power save timeout in minutes (0=off, plain text)
 └── sleeptimer.cfg      # Persisted audio sleep timer in minutes (0=off, plain text)
@@ -173,7 +175,7 @@ Board: `lolin_d32_pro`, framework: `arduino`, CPU: 240 MHz, `BOARD_HAS_PSRAM` en
 
 Pure logic (anything not coupled to SD/I2S/Serial/PN532) is covered by Unity tests in `test/test_pure/test_main.cpp`. The test program `#include`s the pure source files directly (`wav_parser.cpp`, `tag_utils.cpp`, `encoder_gray.h`, `value_array.h`) so the native env doesn't need Arduino stubs. When adding a new pure helper, prefer putting it in a header or pure-only `.cpp` so it stays testable.
 
-What's covered: `uidToStr`, `lookupTag`, `parseWavHeaderBuffer`, `parseWavMetaBuffer`, `findCanonicalListInfo`, `canonicalListFieldOffsets`, `buildCanonicalListInfo`, `writeCanonicalField`, `wavDurationSeconds`, `grayStep`, `valueToIndex`, `indexToValue`, `sleepTimerShouldFire`, `powerSaveShouldSleep`, `timerRemainingMs`, `formatCountdownMMSS`, and the **top-level tag/sleep/powersave FSM** (`jukeboxStep`). The FSM tests cover tag arrival, removal debounce, sleep-timer-fired suppression, power-save entry, NFC-suppressed-wake, and a full sleep-timer recovery scenario end-to-end. What's NOT covered (and needs on-target verification): the I2S setup, the SD-backed `playWav` streaming loop, the encoder ISR + button debounce state machine, the management GUI, the web server.
+What's covered: `uidToStr`, `lookupTag`, `parseWavHeaderBuffer`, `parseWavMetaBuffer`, `findCanonicalListInfo`, `canonicalListFieldOffsets`, `buildCanonicalListInfo`, `writeCanonicalField`, `wavDurationSeconds`, `grayStep`, `valueToIndex`, `indexToValue`, `sleepTimerShouldFire`, `powerSaveShouldSleep`, `timerRemainingMs`, `formatCountdownMMSS`, `volumeAdjust`, `effectiveVolume`, and the **top-level tag/sleep/powersave FSM** (`jukeboxStep`). The FSM tests cover tag arrival, removal debounce, sleep-timer-fired suppression, power-save entry, NFC-suppressed-wake, and a full sleep-timer recovery scenario end-to-end. What's NOT covered (and needs on-target verification): the I2S setup, the SD-backed `playWav` streaming loop, the encoder ISR + button debounce state machine, the management GUI, the web server.
 
 ### State machine architecture
 
