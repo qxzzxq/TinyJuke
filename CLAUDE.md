@@ -162,11 +162,12 @@ Paths may or may not start with `/` — `playWav()` prepends it if missing.
 ~/.platformio/penv/bin/pio run              # build (env:release)
 ~/.platformio/penv/bin/pio run -e debug     # build with -DDEV_MODE
 ~/.platformio/penv/bin/pio run -t upload    # flash
+~/.platformio/penv/bin/pio run -e release-4mb -t upload  # flash the 4 MB-flash board
 ~/.platformio/penv/bin/pio device monitor   # serial (115200 baud)
 ~/.platformio/penv/bin/pio test -e native   # run host-side unit tests
 ```
 
-Board: `lolin_d32_pro`, framework: `arduino`, CPU: 240 MHz, partitions: `partitions_16mb_ota.csv` (the chip is 16 MB despite the board def claiming 4 MB — two 6 MB OTA app slots; `board_upload.flash_size`/`maximum_size` overridden in platformio.ini), `BOARD_HAS_PSRAM` enabled (used by BMP loader). Three PIO environments: `release` (default), `debug` (`-DDEV_MODE` exposes extra short-timeout options on Power Saving and Sleep Timer screens for testing), and `native` (host-only, runs Unity tests in `test/test_pure/` against pure-logic source files — no Arduino/ESP-IDF needed).
+Board: `lolin_d32_pro`, framework: `arduino`, CPU: 240 MHz, `BOARD_HAS_PSRAM` enabled (used by BMP loader). **The D32 Pro ships in 4 MB and 16 MB flash variants with identical markings** — verify with `esptool.py flash_id` (16 MB main board vs. a 4 MB second board, GD25LQ32). Partition tables: `partitions_16mb_ota.csv` (two 6 MB OTA app slots; the board def claims 4 MB so `board_upload.flash_size`/`maximum_size` are overridden in platformio.ini) and `partitions_4mb_ota.csv` (two ~1.94 MB OTA slots, no SPIFFS — flashing the 16 MB table onto a 4 MB chip boot-loops with "load partition table error"). Four PIO environments: `release` (default, 16 MB), `release-4mb` (4 MB variant), `debug` (16 MB, `-DDEV_MODE` exposes extra short-timeout options on Power Saving and Sleep Timer screens for testing), and `native` (host-only, runs Unity tests in `test/test_pure/` against pure-logic source files — no Arduino/ESP-IDF needed).
 
 ## Testing
 

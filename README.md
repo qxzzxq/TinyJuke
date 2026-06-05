@@ -183,7 +183,7 @@ All fields except `file` are optional. `img` paths are relative to `/img/` on th
 
 **Flash steps:**
 1. Format SD card as FAT32, copy `music/`, `img/` (optional), and `tags.json` to the root
-2. Run `~/.platformio/penv/bin/pio run -t upload` to build and flash over USB
+2. Run `~/.platformio/penv/bin/pio run -t upload` to build and flash over USB. The D32 Pro ships in 4 MB and 16 MB flash variants with identical markings (check with `esptool.py flash_id`) — use `-e release-4mb` for a 4 MB board, since the default 16 MB partition table boot-loops on a 4 MB chip
 3. Run `~/.platformio/penv/bin/pio device monitor` to see boot diagnostics and scanned UIDs at 115200 baud
 
 **Tests:** Pure logic (WAV header/metadata parsing, UID formatting, tag lookup, encoder gray-code, value-array helpers) has host-side Unity tests. Run them with `~/.platformio/penv/bin/pio test -e native` — no board required.
