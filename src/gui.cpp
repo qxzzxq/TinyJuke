@@ -232,7 +232,11 @@ void guiLoop() {
         updateMenuSelection(prev, menuSel);
       } else if (ev == ENC_CLICK) {
         switch (menuSel) {
-          case MI_WEB:         initWebServer(); webRunning = true; scr = Screen::WEB; break;
+          case MI_WEB:         {
+            extern PN532 nfc;  // defined in main.cpp
+            initWebServer(nfc); webRunning = true; scr = Screen::WEB;
+            break;
+          }
           case MI_BLUETOOTH:   {
             extern PN532 nfc;  // defined in main.cpp
             initBluetoothMode(nfc); btRunning = true; scr = Screen::BLUETOOTH;
