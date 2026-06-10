@@ -64,7 +64,7 @@ src/
 ├── bluetooth.h/.cpp  — A2DP sink wrapper: lifecycle, AVRCP metadata (ASCII-validated), NFC poll for tag-switch prompt, sleep-timer integration
 └── main.cpp          — Peripherals (bus, gfx, nfc), setup(), loop(), sleep/wake logic
 test/test_pure/       — Unity tests for pure logic; runs on host via `pio test -e native`
-platformio.ini        — PlatformIO project config + library dependencies (envs: release, debug, native)
+platformio.ini        — PlatformIO config + deps; board/flash mixins → envs: lolin_d32_pro (default), -4mb, -debug, wrover_e, wrover_e-debug, lolin_d32 (WROOM-32, no PSRAM), native
 README.md             — User-facing docs (wiring, build steps, SD layout)
 ```
 
@@ -161,15 +161,18 @@ Paths may or may not start with `/` — `playWav()` prepends it if missing.
 ## Build & flash
 
 ```bash
-~/.platformio/penv/bin/pio run              # build (env:release)
-~/.platformio/penv/bin/pio run -e debug     # build with -DDEV_MODE
-~/.platformio/penv/bin/pio run -t upload    # flash
-~/.platformio/penv/bin/pio run -e release-4mb -t upload  # flash the 4 MB-flash board
-~/.platformio/penv/bin/pio device monitor   # serial (115200 baud)
-~/.platformio/penv/bin/pio test -e native   # run host-side unit tests
+~/.platformio/penv/bin/pio run                       # build default (env:lolin_d32_pro)
+~/.platformio/penv/bin/pio run -e lolin_d32_pro-debug # build with -DDEV_MODE
+~/.platformio/penv/bin/pio run -t upload             # flash the default board
+~/.platformio/penv/bin/pio run -e lolin_d32_pro-4mb -t upload  # flash the 4 MB D32 Pro
+~/.platformio/penv/bin/pio run -e wrover_e -t upload # build/flash the custom WROVER-E PCB
+~/.platformio/penv/bin/pio device monitor            # serial (115200 baud)
+~/.platformio/penv/bin/pio test -e native            # run host-side unit tests
 ```
 
-Board: `lolin_d32_pro`, framework: `arduino`, CPU: 240 MHz, `BOARD_HAS_PSRAM` enabled (used by BMP loader). **The D32 Pro ships in 4 MB and 16 MB flash variants with identical markings** — verify with `esptool.py flash_id` (16 MB main board vs. a 4 MB second board, GD25LQ32). Partition tables: `partitions_16mb_ota.csv` (two 6 MB OTA app slots; the board def claims 4 MB so `board_upload.flash_size`/`maximum_size` are overridden in platformio.ini) and `partitions_4mb_ota.csv` (two ~1.94 MB OTA slots, no SPIFFS — flashing the 16 MB table onto a 4 MB chip boot-loops with "load partition table error"). Four PIO environments: `release` (default, 16 MB), `release-4mb` (4 MB variant), `debug` (16 MB, `-DDEV_MODE` exposes extra short-timeout options on Power Saving and Sleep Timer screens for testing), and `native` (host-only, runs Unity tests in `test/test_pure/` against pure-logic source files — no Arduino/ESP-IDF needed).
+Framework: `arduino`, CPU: 240 MHz, PSRAM (`BOARD_HAS_PSRAM`) enabled on the PSRAM modules (D32 Pro / WROVER-E) and used by the BMP loader. **The D32 Pro ships in 4 MB and 16 MB flash variants with identical markings** — verify with `esptool.py flash_id` (16 MB main board vs. a 4 MB second board, GD25LQ32). Partition tables: `partitions_16mb_ota.csv` (two 6 MB OTA app slots; the board def claims 4 MB so `board_upload.flash_size`/`maximum_size` are overridden in platformio.ini) and `partitions_4mb_ota.csv` (two ~1.94 MB OTA slots, no SPIFFS — flashing the 16 MB table onto a 4 MB chip boot-loops with "load partition table error").
+
+**Build profiles.** `platformio.ini` factors axes into reusable mixin sections composed with `extends`: a **board** axis (`[board_d32pro]` → `lolin_d32_pro`; `[board_wrover_e]` → generic `esp32dev` + `-DBOARD_WROVER_E`; `[board_lolin_d32]` → plain `lolin_d32`/WROOM-32 + `-DBOARD_WROVER_E`) and a **flash** axis (`[flash_16mb]` / `[flash_4mb]`). PSRAM compile flags live in a `psram_flags` fragment in `[common]`, interpolated **only** by the modules that have PSRAM (D32 Pro, WROVER-E) — the WROOM-32 omits them (defining `BOARD_HAS_PSRAM` with no PSRAM present makes the core try to init absent RAM). Pins are board-specific: `config.h` keys off `BOARD_WROVER_E` (`#if`/`#else`, D32 Pro is the default branch). Concrete environments: `lolin_d32_pro` (**default**, 16 MB), `lolin_d32_pro-4mb`, `lolin_d32_pro-debug` (`-DDEV_MODE` exposes extra short-timeout options on Power Saving and Sleep Timer screens for testing), `wrover_e` (16 MB custom PCB), `wrover_e-debug`, `lolin_d32` (WROOM-32, 4 MB, **no PSRAM** — a prototype running the new WROVER-E pin map on a plain Lolin D32; large album-art BMPs won't fit in DRAM without PSRAM, so art falls back/skips), and `native` (host-only Unity tests in `test/test_pure/`, no Arduino/ESP-IDF). `default_envs = lolin_d32_pro`, so a bare `pio run` builds the current hardware. The WROVER-E pin map lives in `docs/esp32_wrover_e_pin_map.md`.
 
 ## Testing
 

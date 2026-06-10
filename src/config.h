@@ -14,18 +14,56 @@
 #undef TFT_RST
 #endif
 
+// Pin map is board-specific: -DBOARD_WROVER_E (set by the wrover_e PIO env) selects
+// the custom mainboard; the default branch is the Lolin D32 Pro.
+#if defined(BOARD_WROVER_E)
+// ===== Custom WROVER-E mainboard — see docs/esp32_wrover_e_pin_map.md =====
+
+// --- PN532 (HSU / UART2) ---
+#define PN532_TX 27  // PN532 TX → ESP32 RX
+#define PN532_RX 26  // ESP32 TX → PN532 RX
+
+// --- Shared SPI bus (VSPI): SD card + TFT ---
+#define SCK  18
+#define MOSI 23
+#define MISO 19
+
+// --- TFT (ST7789V, 240x320, SPI) ---
+#define TFT_CS   22
+#define TFT_DC   21
+#define TFT_RST  4
+#define TFT_BL   13
+
+// --- SD card ---
+#define SD_CS 5
+
+// --- MAX98357A (I2S) ---
+#define I2S_BCLK 32
+#define I2S_LRC  33
+#define I2S_DOUT 25
+
+// --- Rotary encoder ---
+#define ENC_CLK  36
+#define ENC_DT   39
+#define ENC_SW   34
+
+#else
+// ===== Lolin D32 Pro (default / current hardware) =====
+
 // --- PN532 (HSU / UART2) ---
 #define PN532_TX 22  // PN532 TX → ESP32 RX
 #define PN532_RX 13  // ESP32 TX → PN532 RX
+
+// --- Shared SPI bus (VSPI): SD card + TFT ---
+#define SCK  18
+#define MOSI 23
+#define MISO 19
 
 // --- TFT (ST7789V, 240x320, SPI) via D32 Pro on-board TFT port ---
 #define TFT_CS   14
 #define TFT_DC   27
 #define TFT_RST  33
 #define TFT_BL   32
-#define TFT_SCK  18
-#define TFT_MOSI 23
-#define TFT_MISO 19
 
 // --- SD card ---
 #define SD_CS 4
@@ -40,6 +78,8 @@
 #define ENC_DT   5
 #define ENC_SW   34
 
+#endif
+
 // --- Audio ---
 #define VOLUME_DEFAULT 25   // 0–100, default on boot
 #define VOLUME_MAX     100
@@ -53,7 +93,7 @@
 #define BRIGHTNESS_PWM_RES   8
 
 // --- Dev mode: define DEV_MODE via PlatformIO build_flags (-DDEV_MODE) ---
-// Use `pio run -e debug` to build with DEV_MODE enabled.
+// Use `pio run -e lolin_d32_pro-debug` (or `-e wrover_e-debug`) to build with DEV_MODE.
 
 // --- Power saving ---
 #define POWERSAVE_DEFAULT   15    // minutes, 0 = off

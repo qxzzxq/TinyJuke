@@ -127,7 +127,7 @@ The web interface provides:
 - **Image upload** — manually upload BMP/JPG/PNG album art to `/img/` (`POST /upload-img`)
 - **Album art picker** — choose any image in `/img/` when editing a tag (served via `GET /img?name=...`)
 - **Music management** — the Music tab lists every file in `/music/` with size, duration, and embedded title/artist (`GET /api/music`). Edit metadata (written into the WAV's LIST INFO chunk via `POST /api/file/meta`) or delete a file (`DELETE /api/file?name=...`) — deleting also removes any tags that reference it, after a confirmation listing them. Files uploaded through the web UI carry a fixed-size LIST INFO chunk so metadata edits are instant; older files are rewritten once on first edit (can take ~tens of seconds for long tracks).
-- **Firmware update (OTA)** — the System tab shows the running firmware version and accepts a `.bin` image (`POST /update`), protected by a 4-digit PIN displayed on the device's web server screen (so joining the WiFi alone is not enough to flash the device). The image is written to the inactive OTA slot with progress on the device screen; on success the device reboots into the new firmware. Build the image with `pio run` and find it at `.pio/build/release/firmware.bin`. Note: after switching to the OTA partition table (v1.6.0), the first flash must be done over USB; there is no automatic rollback if an update misbehaves.
+- **Firmware update (OTA)** — the System tab shows the running firmware version and accepts a `.bin` image (`POST /update`), protected by a 4-digit PIN displayed on the device's web server screen (so joining the WiFi alone is not enough to flash the device). The image is written to the inactive OTA slot with progress on the device screen; on success the device reboots into the new firmware. Build the image with `pio run` and find it at `.pio/build/lolin_d32_pro/firmware.bin`. Note: after switching to the OTA partition table (v1.6.0), the first flash must be done over USB; there is no automatic rollback if an update misbehaves.
 
 Changes are written to `/tags.json` on the SD card immediately.
 
@@ -184,7 +184,7 @@ All fields except `file` are optional. `img` paths are relative to `/img/` on th
 
 **Flash steps:**
 1. Format SD card as FAT32, copy `music/`, `img/` (optional), and `tags.json` to the root
-2. Run `~/.platformio/penv/bin/pio run -t upload` to build and flash over USB. The D32 Pro ships in 4 MB and 16 MB flash variants with identical markings (check with `esptool.py flash_id`) — use `-e release-4mb` for a 4 MB board, since the default 16 MB partition table boot-loops on a 4 MB chip
+2. Run `~/.platformio/penv/bin/pio run -t upload` to build and flash over USB. The D32 Pro ships in 4 MB and 16 MB flash variants with identical markings (check with `esptool.py flash_id`) — use `-e lolin_d32_pro-4mb` for a 4 MB board, since the default 16 MB partition table boot-loops on a 4 MB chip (custom WROVER-E PCB: build with `-e wrover_e`)
 3. Run `~/.platformio/penv/bin/pio device monitor` to see boot diagnostics and scanned UIDs at 115200 baud
 
 **Tests:** Pure logic (WAV header/metadata parsing, UID formatting, tag lookup, encoder gray-code, value-array helpers) has host-side Unity tests. Run them with `~/.platformio/penv/bin/pio test -e native` — no board required.
