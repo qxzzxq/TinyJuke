@@ -1,0 +1,8 @@
+# 8 MB flash (WROVER-E N8R8), dual ~3.94 MB OTA app slots (current firmware ~1.9 MB).
+# No SPIFFS — all storage is on the SD card. First flash must go over USB.
+# Name,    Type, SubType,  Offset,   Size
+nvs,       data, nvs,      0x9000,   0x5000,
+otadata,   data, ota,      0xe000,   0x2000,
+app0,      app,  ota_0,    0x10000,  0x3F0000,
+app1,      app,  ota_1,    0x400000, 0x3F0000,
+coredump,  data, coredump, 0x7F0000, 0x10000,
