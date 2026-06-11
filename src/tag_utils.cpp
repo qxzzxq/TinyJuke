@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 qxzzxq
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Pure (no Arduino/Serial deps) tag helpers split out from tags.cpp so they
 // can be exercised by the native test environment.
 

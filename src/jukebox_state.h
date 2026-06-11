@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 qxzzxq
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #pragma once
 
 // Top-level jukebox state machine — pure logic, host-testable.

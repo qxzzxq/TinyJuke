@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 qxzzxq
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // ESP Jukebox
 //
 // TFT (ST7789V, 240x320) and SD card share the VSPI bus (GPIO 18/19/23).

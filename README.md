@@ -202,3 +202,25 @@ All fields except `file` are optional. `img` paths are relative to `/img/` on th
 Milestone 4 in progress. Added: Bluetooth A2DP sink (speaker) mode with AVRCP metadata display, encoder volume control, sleep-timer + power-save integration, an RFID tag-detected prompt that hands off to jukebox playback, web-based music management (list / edit WAV metadata / delete with tag cascade), OTA firmware updates from the web UI (16 MB partition table with dual app slots), and a max-volume setting configurable from the Volume screen (loudness scale factor in jukebox mode, hard cap in Bluetooth mode).
 
 Prior milestones: web-based tag management, WAV + image upload, browser-side MP3/M4A/AAC/OGG/FLAC → WAV conversion with embedded-art extraction, runtime volume control, encoder-driven GUI with Brightness / Power Saving / Sleep Timer / Version screens, BMP album art (240×240, scaled in PSRAM), tag hot-swap detection, and amp-touch-noise mitigation via I2S priming.
+
+## License
+
+This is an open-hardware project, so the code, the hardware design, and the documentation are licensed separately. All three licenses are copyleft: you can use, modify, and redistribute the project, but anything you build from it has to stay open under the same license.
+
+| Part | Covers | License |
+|------|--------|---------|
+| Firmware / source code | `src/`, `test/`, `platformio.ini`, partition tables, build config | [GPL-3.0-or-later](LICENSE) |
+| Hardware design | PCB schematics & board layout in `docs/` | [CERN-OHL-S-2.0](LICENSES/CERN-OHL-S-2.0.txt) |
+| Documentation & enclosure | `README.md`, `docs/*.md`, design notes, 3D-printable enclosure files | [CC-BY-SA-4.0](LICENSES/CC-BY-SA-4.0.txt) |
+
+Copyright © 2026 qxzzxq.
+
+Third-party components have their own licenses and are not covered by the above:
+
+- PN532 NFC library (`lib/PN532*`) — BSD 3-Clause (Adafruit / Seeed), see `lib/PN532/license.txt`
+- Arduino_GFX — BSD (Adafruit-derived)
+- ArduinoJson — MIT
+- ESP32-A2DP — Apache-2.0
+- arduino-esp32 core (SD, WiFi, WebServer, SPI, I2S) — LGPL-2.1
+
+These are all GPL-compatible, so the firmware as a whole can ship under GPL-3.0-or-later.

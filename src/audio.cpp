@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 qxzzxq
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #include "audio.h"
 #include "screen.h"
 #include "encoder.h"
