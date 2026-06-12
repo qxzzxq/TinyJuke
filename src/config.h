@@ -27,9 +27,9 @@
 #define PN532_RX 26  // ESP32 TX → PN532 RX
 
 // --- Shared SPI bus (VSPI): SD card + TFT ---
-#define SCK  18
-#define MOSI 23
-#define MISO 19
+#define SCK  18  // TFT: SCL
+#define MOSI 23  // TFT: SDA
+#define MISO 19  // TFT: null
 
 // --- TFT (ST7789V, 240x320, SPI) ---
 #define TFT_CS   22
