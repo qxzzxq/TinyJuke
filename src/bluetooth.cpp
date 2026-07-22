@@ -9,6 +9,7 @@
 #include "tags.h"
 #include <BluetoothA2DPSink.h>
 #include <driver/i2s.h>
+#include "esp_mac.h"   // esp_read_mac / ESP_MAC_BT for the unique device name
 
 // ----------------------------------------------------------------
 //  State
@@ -40,6 +41,23 @@ static int       s_lastVolumeSent = -1;
 static uint32_t  s_lastPeerPollMs = 0;
 
 static bool      s_sleepFired     = false;
+
+// ----------------------------------------------------------------
+//  Device name — base prefix + last 4 hex of the Bluetooth MAC, so
+//  multiple units advertise distinct names (e.g. TinyJuke-A1B2). Read
+//  from efuse, so it's valid before the BT stack starts (used by the
+//  pairing screen too).
+// ----------------------------------------------------------------
+
+const char *btDeviceName() {
+  static char name[24] = "";
+  if (!name[0]) {
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_BT);
+    snprintf(name, sizeof(name), "%s-%02X%02X", BT_DEVICE_NAME, mac[4], mac[5]);
+  }
+  return name;
+}
 
 // ----------------------------------------------------------------
 //  ASCII validation — used to filter AVRCP metadata. Latin-1 / UTF-8
@@ -202,7 +220,7 @@ void initBluetoothMode(PN532 &nfc) {
 #ifdef DEV_MODE
   Serial.println("[BT] start() — auto_reconnect=true");
 #endif
-  a2dp_sink.start((char *)BT_DEVICE_NAME);
+  a2dp_sink.start((char *)btDeviceName());
 #ifdef DEV_MODE
   esp_bd_addr_t *last = a2dp_sink.get_last_peer_address();
   if (last) {

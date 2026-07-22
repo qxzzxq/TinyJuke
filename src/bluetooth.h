@@ -32,3 +32,4 @@ bool btMetadataChanged();      // title/artist/connection changed since last rea
 const char *btTrackTitle();    // "" when invalid / not reported
 const char *btTrackArtist();
 const char *btPeerName();      // "" when no peer
+const char *btDeviceName();    // advertised name "TinyJuke-XXXX" (base + MAC suffix)

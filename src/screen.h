@@ -26,7 +26,7 @@ void drawVersionScreen();
 void drawWebServerScreen(int connections);
 void drawRebootConfirmScreen();
 void drawRebootingScreen();
-void drawBluetoothScreen(bool connected, const char *peer,
+void drawBluetoothScreen(bool connected, const char *deviceName, const char *peer,
                          const char *title, const char *artist, int volume);
 void drawBluetoothTagPromptScreen();
 

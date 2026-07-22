@@ -115,17 +115,18 @@
 #endif
 
 // --- Version ---
-#define VERSION_STRING       "v1.8.1"
+#define VERSION_STRING       "v1.8.2"
 
 // --- Menu ---
 #define MENU_ITEM_COUNT      8
 
 // --- Web server ---
-#define WIFI_SSID     "Jukebox-Setup"
+#define WIFI_SSID     "TinyJuke-Setup"
 #define WIFI_PASSWORD "12345678"
 
 // --- Bluetooth ---
-#define BT_DEVICE_NAME "Jukebox"
+// Base prefix; the advertised name appends the last 4 hex of the MAC (TinyJuke-XXXX).
+#define BT_DEVICE_NAME "TinyJuke"
 
 // --- Colors (RGB565, dark modern theme) ---
 #define C_BG        0x0865   // #0A0E1A — very dark navy

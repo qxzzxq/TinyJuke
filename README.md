@@ -1,4 +1,4 @@
-# ESP Jukebox
+# TinyJuke
 
 An RFID-driven jukebox built around an ESP32. Scan an NFC tag to play the linked track. Tag stickers are embedded in 3D-printed objects themed around the music they trigger.
 
@@ -104,7 +104,7 @@ Unknown tags are displayed on screen for 10 seconds with their UID. Click or hol
 
 ## Bluetooth speaker mode
 
-Hold the encoder to enter the menu and select **Bluetooth**. The ESP32 starts an A2DP sink and advertises itself as `Jukebox`. Pair from a phone and play music from any app. While in BT mode:
+Hold the encoder to enter the menu and select **Bluetooth**. The ESP32 starts an A2DP sink and advertises itself as `TinyJuke-XXXX` (unique per device — the base name plus the last 4 hex digits of the MAC). Pair from a phone and play music from any app. While in BT mode:
 
 - **Rotate** the encoder to adjust volume (saved to `/volume.cfg`)
 - **Hold** the encoder to stop Bluetooth and return to the menu
@@ -117,7 +117,7 @@ Bluetooth and the Web Server cannot run at the same time, so the menu items are 
 
 ## Web server & tag management
 
-Hold the encoder button (>600ms) to enter the management menu, then select "Web Server" to start a WiFi access point. Connect a phone or laptop to the **Jukebox-Setup** network (password: `12345678`) and open `http://192.168.4.1` in a browser.
+Hold the encoder button (>600ms) to enter the management menu, then select "Web Server" to start a WiFi access point. Connect a phone or laptop to the **TinyJuke-Setup** network (password: `12345678`) and open `http://192.168.4.1` in a browser.
 
 The web interface provides:
 - **Tag grid**: browse all registered tags with album art, title, and artist

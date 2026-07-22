@@ -25,7 +25,7 @@ static const char PAGE_HTML[] = R"HTML(
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Jukebox</title>
+<title>TinyJuke</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0A0E1A;color:#eee;min-height:100vh}
@@ -109,7 +109,7 @@ h1{font-size:22px;color:#4ADE80;font-weight:700}
 </head>
 <body>
 <div id="app">
-<header><h1>Jukebox</h1><div id="stats"></div></header>
+<header><h1>TinyJuke</h1><div id="stats"></div></header>
 <div id="tabs">
 <button id="tab-tags" class="tab active">Tags</button>
 <button id="tab-music" class="tab">Music</button>
