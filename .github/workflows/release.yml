@@ -1,0 +1,85 @@
+name: Build and release firmware
+
+# Bump VERSION_STRING in src/config.h and push to main → this builds the
+# wrover_e firmware and publishes a GitHub release for the new version.
+# The release-exists guard means ordinary config.h edits that don't change
+# the version are no-ops.
+on:
+  push:
+    branches: [main]
+    paths:
+      - src/config.h
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read firmware version
+        id: version
+        run: |
+          VERSION=$(grep -oE '#define VERSION_STRING[[:space:]]+"[^"]+"' src/config.h \
+                    | grep -oE '"[^"]+"' | tr -d '"')
+          if [ -z "$VERSION" ]; then
+            echo "Could not parse VERSION_STRING from src/config.h" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Firmware version: $VERSION"
+
+      - name: Check whether this release already exists
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release ${{ steps.version.outputs.version }} already exists — nothing to do."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python
+        if: steps.check.outputs.exists == 'false'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache PlatformIO
+        if: steps.check.outputs.exists == 'false'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-${{ runner.os }}-
+
+      - name: Install PlatformIO
+        if: steps.check.outputs.exists == 'false'
+        run: pip install --upgrade platformio
+
+      - name: Build wrover_e firmware
+        if: steps.check.outputs.exists == 'false'
+        run: pio run -e wrover_e
+
+      - name: Stage firmware artifact
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          cp .pio/build/wrover_e/firmware.bin \
+             "tinyjuke-wrover_e-${{ steps.version.outputs.version }}.bin"
+
+      - name: Create GitHub release
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.version }}" \
+            "tinyjuke-wrover_e-${{ steps.version.outputs.version }}.bin" \
+            --title "TinyJuke ${{ steps.version.outputs.version }}" \
+            --generate-notes
