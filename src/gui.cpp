@@ -50,7 +50,7 @@ static bool      btConnDrawn = false;
 // ----------------------------------------------------------------
 
 static void drawBluetoothCurrent() {
-  drawBluetoothScreen(btIsConnected(), btPeerName(),
+  drawBluetoothScreen(btIsConnected(), btDeviceName(), btPeerName(),
                       btTrackTitle(), btTrackArtist(), volumeLevel);
   btVolDrawn  = volumeLevel;
   btConnDrawn = btIsConnected();

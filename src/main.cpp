@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 qxzzxq
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// ESP Jukebox
+// TinyJuke
 //
 // TFT (ST7789V, 240x320) and SD card share the VSPI bus (GPIO 18/19/23).
 // Arduino_ESP32SPI and the SD library both use bare-metal SPI — only one CS
@@ -238,7 +238,7 @@ void setup() {
   Serial.begin(115200);
   while (!Serial) delay(10);
   delay(200);
-  Serial.println("\nESP Jukebox starting...");
+  Serial.println("\nTinyJuke starting...");
 
   // 1. Init TFT (backlight already held off by the digitalWrite above; the
   //    LEDC takeover preserves the LOW level).
@@ -287,7 +287,7 @@ void setup() {
   loadSleepTimer();
   s_state = jukeboxInitialState(millis());
 
-  Serial.println("Jukebox Ready.");
+  Serial.println("TinyJuke Ready.");
 }
 
 // ================================================================

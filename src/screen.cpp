@@ -98,7 +98,7 @@ static int  s_playbackVolDrawn = -1;
 
 void drawWaitingScreen() {
   gfx.fillScreen(C_BG);
-  centerText("Jukebox", 100, C_TEXT, 3);
+  centerText("TinyJuke", 100, C_TEXT, 3);
   centerText("scan a tag", 170, C_MUTED, 2);
   drawHintBar("hold for menu");
 }
@@ -495,7 +495,7 @@ void drawWebProgress(const char *label, int pct) {
 //  Bluetooth screen
 // ================================================================
 
-void drawBluetoothScreen(bool connected, const char *peer,
+void drawBluetoothScreen(bool connected, const char *deviceName, const char *peer,
                          const char *title, const char *artist, int volume) {
   gfx.fillScreen(C_BG);
   centerText("Bluetooth", 30, C_ACCENT, 3);
@@ -503,7 +503,7 @@ void drawBluetoothScreen(bool connected, const char *peer,
   // Status line
   if (!connected) {
     centerText("Pair on your phone:", 90, C_MUTED, 2);
-    centerText(BT_DEVICE_NAME, 118, C_TEXT, 2);
+    centerText(deviceName, 118, C_TEXT, 2);
   } else {
     centerText("Connected", 90, C_MUTED, 2);
     if (peer && peer[0]) {
@@ -512,7 +512,7 @@ void drawBluetoothScreen(bool connected, const char *peer,
       truncateToFit(peer, buf, sizeof(buf), maxW, 2);
       centerText(buf, 118, C_TEXT, 2);
     } else {
-      centerText(BT_DEVICE_NAME, 118, C_TEXT, 2);
+      centerText(deviceName, 118, C_TEXT, 2);
     }
   }
 

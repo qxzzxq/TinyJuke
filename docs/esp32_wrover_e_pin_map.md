@@ -1,4 +1,4 @@
-# RFID Jukebox Mainboard — Pin Allocation
+# TinyJuke Mainboard — Pin Allocation
 
 **MCU module:** ESP32-WROVER-E
 **Purpose:** revised GPIO map grouping each peripheral onto a single side of the module for easier PCB routing.

@@ -25,7 +25,7 @@ static const char PAGE_HTML[] = R"HTML(
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Jukebox</title>
+<title>TinyJuke</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0A0E1A;color:#eee;min-height:100vh}
@@ -65,13 +65,16 @@ h1{font-size:22px;color:#4ADE80;font-weight:700}
 #actions button{padding:10px 24px;border-radius:8px;border:none;cursor:pointer;font-size:15px;font-weight:500;transition:background .15s}
 #btn-add{background:#4ADE80;color:#0A0E1A}
 #btn-add:hover{background:#6ee79a}
-#btn-upload{background:#111A2E;color:#eee;border:1px solid #1E293B}
-#btn-upload:hover{background:#1E293B}
+#btn-upload,#btn-upload-img{background:#111A2E;color:#eee;border:1px solid #1E293B}
+#btn-upload:hover,#btn-upload-img:hover{background:#1E293B}
 
-#upload-panel,#upload-img-panel,#fw-panel{display:none;margin-top:16px;padding:16px;background:#111A2E;border-radius:10px;border:1px solid #1E293B}
-#fw-panel{display:block;margin-top:0}
-#upload-panel label,#upload-img-panel label,#fw-panel label{font-size:13px;color:#6B7B8D;display:block;margin-bottom:8px}
-#upload-panel input[type=file],#upload-img-panel input[type=file],#fw-panel input[type=file]{color:#eee;margin-bottom:8px;width:100%}
+#fw-panel{margin-top:0;padding:16px;background:#111A2E;border-radius:10px;border:1px solid #1E293B}
+#fw-panel label{font-size:13px;color:#6B7B8D;display:block;margin-bottom:8px}
+.modal-body input[type=file],#fw-panel input[type=file]{padding:9px 10px;border:1px dashed #24324a;border-radius:6px;background:#0A0E1A;color:#6B7B8D;font-size:13px;width:100%;cursor:pointer}
+.modal-body input[type=file]::file-selector-button,#fw-panel input[type=file]::file-selector-button{padding:6px 14px;margin-right:12px;border:none;border-radius:5px;background:#1E293B;color:#eee;font-size:13px;font-weight:500;cursor:pointer;transition:background .15s}
+.modal-body input[type=file]:hover::file-selector-button,#fw-panel input[type=file]:hover::file-selector-button{background:#2d3a4f}
+.modal-body input[type=file]::-webkit-file-upload-button,#fw-panel input[type=file]::-webkit-file-upload-button{padding:6px 14px;margin-right:12px;border:none;border-radius:5px;background:#1E293B;color:#eee;font-size:13px;font-weight:500;cursor:pointer}
+.modal-hint{font-size:12px;color:#6B7B8D;line-height:1.5}
 #upload-progress,#upload-img-progress,#fw-progress{width:100%;height:6px;display:none;accent-color:#4ADE80}
 #upload-status,#upload-img-status,#fw-status{font-size:12px;color:#6B7B8D;margin-top:8px;min-height:14px}
 #btn-upload-start:disabled,#btn-img-upload-start:disabled,#btn-fw-install:disabled{opacity:.5;cursor:default}
@@ -92,11 +95,11 @@ h1{font-size:22px;color:#4ADE80;font-weight:700}
 .modal-body input[readonly]{color:#6B7B8D;cursor:default}
 .modal-footer{display:flex;gap:8px;padding:0 16px 16px;justify-content:flex-end}
 .modal-footer button{padding:8px 18px;border-radius:6px;border:none;cursor:pointer;font-size:14px;font-weight:500;transition:background .15s}
-#btn-save,#btn-music-save{background:#4ADE80;color:#0A0E1A}
-#btn-save:hover,#btn-music-save:hover{background:#6ee79a}
+#btn-save,#btn-music-save,#btn-upload-start,#btn-img-upload-start{background:#4ADE80;color:#0A0E1A}
+#btn-save:hover,#btn-music-save:hover,#btn-upload-start:hover,#btn-img-upload-start:hover{background:#6ee79a}
 #btn-save:disabled,#btn-music-save:disabled{opacity:.5;cursor:default}
-#btn-cancel,#btn-music-cancel{background:#1E293B;color:#eee}
-#btn-cancel:hover,#btn-music-cancel:hover{background:#2d3a4f}
+#btn-cancel,#btn-music-cancel,#audio-cancel,#img-cancel{background:#1E293B;color:#eee}
+#btn-cancel:hover,#btn-music-cancel:hover,#audio-cancel:hover,#img-cancel:hover{background:#2d3a4f}
 #btn-remove,#btn-music-delete{background:none;color:#F87171;margin-right:auto}
 #btn-remove:hover,#btn-music-delete:hover{background:#2a1515}
 
@@ -109,7 +112,7 @@ h1{font-size:22px;color:#4ADE80;font-weight:700}
 </head>
 <body>
 <div id="app">
-<header><h1>Jukebox</h1><div id="stats"></div></header>
+<header><h1>TinyJuke</h1><div id="stats"></div></header>
 <div id="tabs">
 <button id="tab-tags" class="tab active">Tags</button>
 <button id="tab-music" class="tab">Music</button>
@@ -122,24 +125,6 @@ h1{font-size:22px;color:#4ADE80;font-weight:700}
 <button id="btn-add">+ Add Tag</button>
 <button id="btn-upload">Upload Audio</button>
 <button id="btn-upload-img">Upload Image</button>
-</div>
-<div id="upload-panel">
-<label>Select an audio file (WAV / MP3 / M4A / AAC / OGG / FLAC). Non-WAV files are converted in your browser to 44.1 kHz 16-bit mono WAV. Embedded album art (if any) is saved as a 300x300 BMP.</label>
-<input type="file" id="file-input" accept="audio/*,.mp3,.m4a,.aac,.ogg,.oga,.flac,.wav">
-<div style="display:flex;gap:8px;align-items:center;margin-top:8px">
-<button id="btn-upload-start">Convert &amp; Upload</button>
-</div>
-<div id="upload-status"></div>
-<progress id="upload-progress" max="100" value="0"></progress>
-</div>
-<div id="upload-img-panel">
-<label>Select an image file (BMP/JPG/PNG) to upload:</label>
-<input type="file" id="img-file-input" accept=".bmp,.jpg,.jpeg,.png">
-<div style="display:flex;gap:8px;align-items:center;margin-top:8px">
-<button id="btn-img-upload-start">Start Upload</button>
-</div>
-<div id="upload-img-status"></div>
-<progress id="upload-img-progress" max="100" value="0"></progress>
 </div>
 </div>
 <div id="view-music" style="display:none">
@@ -207,6 +192,40 @@ h1{font-size:22px;color:#4ADE80;font-weight:700}
 <button id="btn-music-delete">Delete</button>
 <button id="btn-music-cancel">Cancel</button>
 <button id="btn-music-save">Save</button>
+</div>
+</div>
+</div>
+
+<div id="audio-modal" class="modal-overlay" style="display:none">
+<div class="modal-box">
+<h2>Upload Audio</h2>
+<div class="modal-body">
+<label>Audio File</label>
+<input type="file" id="file-input" accept="audio/*,.mp3,.m4a,.aac,.ogg,.oga,.flac,.wav">
+<p class="modal-hint">WAV / MP3 / M4A / AAC / OGG / FLAC. Non-WAV files are converted in your browser to 44.1 kHz 16-bit mono WAV. Embedded album art (if any) is saved as a 300&times;300 BMP.</p>
+<div id="upload-status"></div>
+<progress id="upload-progress" max="100" value="0"></progress>
+</div>
+<div class="modal-footer">
+<button id="audio-cancel">Cancel</button>
+<button id="btn-upload-start">Convert &amp; Upload</button>
+</div>
+</div>
+</div>
+
+<div id="img-modal" class="modal-overlay" style="display:none">
+<div class="modal-box">
+<h2>Upload Image</h2>
+<div class="modal-body">
+<label>Image File</label>
+<input type="file" id="img-file-input" accept=".bmp,.jpg,.jpeg,.png">
+<p class="modal-hint">BMP / JPG / PNG. Uploaded as-is to /img/ and selectable as album art when editing a tag.</p>
+<div id="upload-img-status"></div>
+<progress id="upload-img-progress" max="100" value="0"></progress>
+</div>
+<div class="modal-footer">
+<button id="img-cancel">Cancel</button>
+<button id="btn-img-upload-start">Upload</button>
 </div>
 </div>
 </div>
@@ -651,15 +670,27 @@ document.getElementById('music-modal').addEventListener('click',function(e){
 if(e.target===e.currentTarget)hideMusicModal();
 });
 
-document.getElementById('btn-upload').addEventListener('click',function(){
-var p=document.getElementById('upload-panel');
-p.style.display=p.style.display==='none'?'block':'none';
-});
+function showAudioModal(){
+document.getElementById('file-input').value='';
+setUploadStatus('',null);
+document.getElementById('audio-modal').style.display='flex';
+}
+function hideAudioModal(){document.getElementById('audio-modal').style.display='none';}
 
-document.getElementById('btn-upload-img').addEventListener('click',function(){
-var p=document.getElementById('upload-img-panel');
-p.style.display=p.style.display==='none'?'block':'none';
-});
+function showImgModal(){
+document.getElementById('img-file-input').value='';
+document.getElementById('upload-img-status').textContent='';
+var p=document.getElementById('upload-img-progress');p.style.display='none';p.value=0;
+document.getElementById('img-modal').style.display='flex';
+}
+function hideImgModal(){document.getElementById('img-modal').style.display='none';}
+
+document.getElementById('btn-upload').addEventListener('click',showAudioModal);
+document.getElementById('btn-upload-img').addEventListener('click',showImgModal);
+document.getElementById('audio-cancel').addEventListener('click',hideAudioModal);
+document.getElementById('img-cancel').addEventListener('click',hideImgModal);
+document.getElementById('audio-modal').addEventListener('click',function(e){if(e.target===e.currentTarget)hideAudioModal();});
+document.getElementById('img-modal').addEventListener('click',function(e){if(e.target===e.currentTarget)hideImgModal();});
 
 var AC=window.AudioContext||window.webkitAudioContext;
 var OAC=window.OfflineAudioContext||window.webkitOfflineAudioContext;
@@ -937,6 +968,7 @@ toast('Album art skipped: '+(e.message||'unknown'),'err');
 setUploadStatus('',null);
 toast('Uploaded '+audioName+(artName?' + '+artName:''),'ok');
 inp.value='';
+hideAudioModal();
 await Promise.all([loadFiles(),loadImages(),loadMusic()]);
 }catch(e){
 setUploadStatus('',null);
@@ -981,7 +1013,7 @@ if(!f){toast('Please select a file first','err');return;}
 doImgUpload('/upload-img', f,
 document.getElementById('upload-img-progress'),
 document.getElementById('upload-img-status'),
-function(){loadImages().then(function(){inp.value='';});});
+function(){loadImages().then(function(){inp.value='';hideImgModal();});});
 });
 
 (async function(){
