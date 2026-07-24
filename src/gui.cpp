@@ -17,6 +17,7 @@ enum class Screen {
   MENU,
   VOLUME,
   BRIGHTNESS,
+  THEME,
   POWERSAVING,
   SLEEPTIMER,
   VERSION,
@@ -31,10 +32,11 @@ static constexpr int MI_WEB         = 0;
 static constexpr int MI_BLUETOOTH   = 1;
 static constexpr int MI_VOLUME      = 2;
 static constexpr int MI_BRIGHTNESS  = 3;
-static constexpr int MI_POWERSAVING = 4;
-static constexpr int MI_SLEEPTIMER  = 5;
-static constexpr int MI_VERSION     = 6;
-static constexpr int MI_REBOOT      = 7;
+static constexpr int MI_THEME       = 4;
+static constexpr int MI_POWERSAVING = 5;
+static constexpr int MI_SLEEPTIMER  = 6;
+static constexpr int MI_VERSION     = 7;
+static constexpr int MI_REBOOT      = 8;
 
 static Screen    scr        = Screen::MENU;
 static bool      active     = false;
@@ -66,6 +68,9 @@ static void redraw() {
       break;
     case Screen::BRIGHTNESS:
       drawBrightnessScreen(brightnessLevel);
+      break;
+    case Screen::THEME:
+      drawThemeScreen(currentTheme());
       break;
     case Screen::POWERSAVING:
       drawPowerSaveScreen(powerSaveMinutes);
@@ -187,6 +192,10 @@ void guiLoop() {
         saveBrightness();
         scr = Screen::MENU; menuSel = MI_BRIGHTNESS;
         break;
+      case Screen::THEME:
+        saveTheme();
+        scr = Screen::MENU; menuSel = MI_THEME;
+        break;
       case Screen::POWERSAVING:
         savePowerSave();
         scr = Screen::MENU; menuSel = MI_POWERSAVING;
@@ -250,6 +259,7 @@ void guiLoop() {
           }
           case MI_VOLUME:      scr = Screen::VOLUME; volAdjMax = false; break;
           case MI_BRIGHTNESS:  scr = Screen::BRIGHTNESS; break;
+          case MI_THEME:       scr = Screen::THEME; break;
           case MI_POWERSAVING: scr = Screen::POWERSAVING; break;
           case MI_SLEEPTIMER:  scr = Screen::SLEEPTIMER; break;
           case MI_VERSION:     scr = Screen::VERSION; break;
@@ -321,6 +331,35 @@ void guiLoop() {
         updateBrightnessDisplay(brightnessLevel);
         applyBrightness();
       }
+      break;
+    }
+
+    // ================ THEME ================
+    // Rotate cycles palettes with instant live preview; CLICK/HOLD saves the
+    // choice to /theme.cfg and returns to the menu.
+    case Screen::THEME: {
+      int oldIdx = currentTheme();
+      int n = themeCount();
+
+      for (;;) {
+        if ((ev > 0 && ev < ENC_CLICK) || ev < 0) {
+          int idx = (currentTheme() + ev) % n;
+          if (idx < 0) idx += n;
+          applyTheme(idx);
+        } else if (ev == ENC_CLICK || ev == ENC_HOLD) {
+          saveTheme();
+          scr = Screen::MENU; menuSel = MI_THEME;
+          redraw();
+          break;
+        }
+        ev = readEncoder();
+        if (ev == ENC_NONE) break;
+      }
+
+      // Palette changed but still on the theme screen -> full repaint in the
+      // new colors (background + swatches change, so no incremental update).
+      if (scr == Screen::THEME && currentTheme() != oldIdx)
+        drawThemeScreen(currentTheme());
       break;
     }
 

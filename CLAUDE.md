@@ -4,7 +4,7 @@
 
 RFID-driven audio player. Scan an NFC tag → lookup UID in `tags.json` on SD card → play the mapped WAV file through a MAX98357A I²S amplifier. Built on a Lolin D32 Pro (ESP32) with Arduino framework on PlatformIO. Display: ST7789V 240×320.
 
-**Status:** Milestone 4 in progress — Bluetooth A2DP sink mode reachable from the menu, with AVRCP metadata display (ASCII-only fallback to "Bluetooth"), encoder volume control via the ESP32-A2DP library's internal volume, sleep-timer + power-save integration, and an RFID tag-detected prompt that hands off to jukebox playback. WiFi (Web Server) and Bluetooth are mutually exclusive in the UI. Web UI has a Music tab: list `/music/` files (size, duration, embedded title/artist, linked-tag count), edit metadata (written into the WAV's LIST INFO chunk), delete with tag-cascade. OTA firmware updates via the System tab (16 MB partition table, two 6 MB app slots; first flash after the table switch must be over USB).
+**Status:** Milestone 4 in progress — Bluetooth A2DP sink mode reachable from the menu, with AVRCP metadata display (ASCII-only fallback to "Bluetooth"), encoder volume control via the ESP32-A2DP library's internal volume, sleep-timer + power-save integration, and an RFID tag-detected prompt that hands off to jukebox playback. WiFi (Web Server) and Bluetooth are mutually exclusive in the UI. A Color Theme menu item swaps the whole UI palette at runtime among several dark themes (persisted to `/theme.cfg`). Web UI has a Music tab: list `/music/` files (size, duration, embedded title/artist, linked-tag count), edit metadata (written into the WAV's LIST INFO chunk), delete with tag-cascade. OTA firmware updates via the System tab (16 MB partition table, two 6 MB app slots; first flash after the table switch must be over USB).
 
 Earlier (Milestone 3): tag hot-swap detection, brightness / power-save / sleep-timer settings persisted to SD, BMP album art (240×240, scaled in PSRAM), version screen, image upload, browser-side MP3/M4A/AAC/OGG/FLAC → WAV conversion with embedded-art extraction, and amp-touch-noise mitigation via I2S priming.
 
@@ -30,7 +30,7 @@ Earlier (Milestone 3): tag hot-swap detection, brightness / power-save / sleep-t
 | 34   | ENC_SW            | Input-only (external pull-up on module)  |
 | 35   | VBAT              | Unused                                   |
 
-MAX98357A config: GAIN → GND (12 dB), SD/Mode → float (mono mix). Volume is software-controlled via encoder (runtime adjustable, persisted to `/volume.cfg` on SD). A separate max-volume setting (persisted to `/maxvolume.cfg`) caps loudness with mode-dependent semantics: in jukebox (WAV) playback it is a **scale factor** — the volume bar keeps its full 0–100 range and the effective output level is `effectiveVolume(vol, maxVol) = vol × maxVol / 100`; in Bluetooth mode it is a **clamp** — `volumeLevel` is limited to `maxVolumeLevel` on BT entry, encoder turns, and phone-pushed AVRCP volume (the value handed to the A2DP stack is echoed to the phone's slider, so scaling there would feedback-fight the phone). The Volume screen shows both parameters: rotate adjusts the active one, CLICK toggles Volume/Max Volume, HOLD saves both and returns to the menu. Brightness is also software-controlled via encoder (persisted to `/brightness.cfg` on SD). Power saving (persisted to `/powersave.cfg`) turns off the display after idle timeout. Audio sleep timer (persisted to `/sleeptimer.cfg`) stops playback after the configured duration.
+MAX98357A config: GAIN → GND (12 dB), SD/Mode → float (mono mix). Volume is software-controlled via encoder (runtime adjustable, persisted to `/volume.cfg` on SD). A separate max-volume setting (persisted to `/maxvolume.cfg`) caps loudness with mode-dependent semantics: in jukebox (WAV) playback it is a **scale factor** — the volume bar keeps its full 0–100 range and the effective output level is `effectiveVolume(vol, maxVol) = vol × maxVol / 100`; in Bluetooth mode it is a **clamp** — `volumeLevel` is limited to `maxVolumeLevel` on BT entry, encoder turns, and phone-pushed AVRCP volume (the value handed to the A2DP stack is echoed to the phone's slider, so scaling there would feedback-fight the phone). The Volume screen shows both parameters: rotate adjusts the active one, CLICK toggles Volume/Max Volume, HOLD saves both and returns to the menu. Brightness is also software-controlled via encoder (persisted to `/brightness.cfg` on SD). Power saving (persisted to `/powersave.cfg`) turns off the display after idle timeout. Audio sleep timer (persisted to `/sleeptimer.cfg`) stops playback after the configured duration. The UI color theme (persisted to `/theme.cfg`) selects one of several dark palettes (defined in `theme.cpp`); the whole `C_` color set is swapped at runtime by `applyTheme()`, and the Color Theme screen rotates through palettes with live preview (CLICK/HOLD saves, default = Bamboo Moss, index `THEME_DEFAULT`).
 
 KY-040 encoder: CLK→GPIO36, DT→GPIO5, SW→GPIO34, +→3.3V, GND→GND. GPIO 34 and 36 are input-only but the module's external 10k pull-up resistors make them work.
 
@@ -46,10 +46,11 @@ KY-040 encoder: CLK→GPIO36, DT→GPIO5, SW→GPIO34, +→3.3V, GND→GND. GPIO
 
 ```
 src/
-├── config.h          — Pin definitions, colors, D32 Pro macro fix, brightness/volume/sleep/BT defaults
+├── config.h          — Pin definitions, D32 Pro macro fix, brightness/volume/sleep/BT/theme defaults (includes theme.h for the C_ color globals)
+├── theme.h/.cpp      — Runtime-switchable UI color themes: C_ RGB565 globals, dark palette table, rgb565hex() helper, applyTheme()/loadTheme()/saveTheme() (/theme.cfg)
 ├── audio.h/.cpp      — playWav(), stopPlayback(), parseWavMeta(), i2sPrime()/i2sDeinit()
 ├── wav_parser.h/.cpp — Pure buffer-based WAV header + LIST/INFO metadata parsers, canonical LIST INFO chunk builders/detectors for in-place metadata editing, duration helper (testable on native)
-├── screen.h/.cpp     — TFT draw functions for 240×320 (extern gfx, uses C_ color constants)
+├── screen.h/.cpp     — TFT draw functions for 240×320 (extern gfx, uses the C_ color globals from theme.h)
 ├── tags.h            — TagInfo struct + declarations
 ├── tags.cpp          — sdReady, printHex (Arduino/Serial-coupled)
 ├── tag_utils.cpp     — tagDoc, uidToStr(), lookupTag() (pure, testable on native)
@@ -59,7 +60,7 @@ src/
 ├── volume_logic.h    — Pure volume policy: volumeAdjust() (independent 0–100 params) + effectiveVolume() scale factor (testable on native)
 ├── timer_logic.h     — Pure timer policy: sleepTimerShouldFire / powerSaveShouldSleep / timerRemainingMs / formatCountdownMMSS
 ├── jukebox_state.h/.cpp — Pure top-level FSM (Waiting / Sleeping + sleepStopped / tagPresent flags) driving loop()'s decisions
-├── gui.h/.cpp        — Management mode (menu + volume/brightness/powersave/sleeptimer/version/web/bluetooth screens)
+├── gui.h/.cpp        — Management mode (menu + volume/brightness/theme/powersave/sleeptimer/version/web/bluetooth screens)
 ├── web.h/.cpp        — WiFi AP, REST API, file upload, SPA HTML page
 ├── bluetooth.h/.cpp  — A2DP sink wrapper: lifecycle, AVRCP metadata (ASCII-validated), NFC poll for tag-switch prompt, sleep-timer integration
 └── main.cpp          — Peripherals (bus, gfx, nfc), setup(), loop(), sleep/wake logic
@@ -109,7 +110,7 @@ WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, d
 **loop() state machine:**
 - Sleep check: if idle on waiting screen > `powerSaveMinutes`, enter sleep (display off, backlight off). When `sleepStopped` is set (sleep timer fired with tag still present), the tag is treated as absent for sleep purposes. The menu screen also honours power-save: idling on `Screen::MENU` for `powerSaveMinutes` exits the GUI to the waiting screen, and the FSM's next tick enters sleep via the same path.
 - Sleep state: poll encoder + NFC for wake; on wake restore display and re-sync. NFC wake is suppressed while `sleepStopped` is true so the still-present tag doesn't immediately re-trigger.
-- Management mode active (`guiActive()`) → delegate to `guiLoop()` (menu, volume, brightness, power saving, sleep timer, version, web server, bluetooth, reboot). Menu items: **Web Server, Bluetooth, Volume, Brightness, Power Saving, Sleep Timer, Version, Reboot**. Reboot shows a confirmation screen — hold = `ESP.restart()`, click/rotate = cancel back to menu.
+- Management mode active (`guiActive()`) → delegate to `guiLoop()` (menu, volume, brightness, power saving, sleep timer, version, web server, bluetooth, reboot). Menu items: **Web Management, Bluetooth Mode, Volume, Brightness, Color Theme, Power Saving, Sleep Timer, Version, Reboot** (9 items; menu `itemH` is 28 px to fit them all above the hint bar). Reboot shows a confirmation screen — hold = `ESP.restart()`, click/rotate = cancel back to menu.
 - Jukebox mode: read encoder; HOLD enters menu (saves volume first). Rotation/click during playback are handled inside `playWav()`, not in the main loop.
 - `!tagPresent && found && !sleepStopped` → tag arrived: lookup UID → enter `while (tagPresent)` replay loop: draw now-playing, optionally draw sleep-timer countdown, run `playWav()`, then quick NFC re-poll. Same UID = replay; different UID = exit (next iteration handles new arrival); no tag (single miss in this quick check) = exit.
 - Sleep timer firing during playback sets `sleepTimerFired` → `sleepStopped`, breaks out of the replay loop and blocks re-trigger until the tag is physically removed.
@@ -140,7 +141,8 @@ WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, d
 ├── maxvolume.cfg       # Persisted max-volume ceiling 0–100 (plain text)
 ├── brightness.cfg      # Persisted brightness level 0–100 (plain text)
 ├── powersave.cfg        # Persisted power save timeout in minutes (0=off, plain text)
-└── sleeptimer.cfg      # Persisted audio sleep timer in minutes (0=off, plain text)
+├── sleeptimer.cfg      # Persisted audio sleep timer in minutes (0=off, plain text)
+└── theme.cfg           # Persisted UI color-theme index (plain text)
 ```
 
 `tags.json` format (only `file` is required):
@@ -178,7 +180,7 @@ Framework: `arduino`, CPU: 240 MHz, PSRAM (`BOARD_HAS_PSRAM`) enabled on the PSR
 
 Pure logic (anything not coupled to SD/I2S/Serial/PN532) is covered by Unity tests in `test/test_pure/test_main.cpp`. The test program `#include`s the pure source files directly (`wav_parser.cpp`, `tag_utils.cpp`, `encoder_gray.h`, `value_array.h`) so the native env doesn't need Arduino stubs. When adding a new pure helper, prefer putting it in a header or pure-only `.cpp` so it stays testable.
 
-What's covered: `uidToStr`, `lookupTag`, `parseWavHeaderBuffer`, `parseWavMetaBuffer`, `findCanonicalListInfo`, `canonicalListFieldOffsets`, `buildCanonicalListInfo`, `writeCanonicalField`, `wavDurationSeconds`, `grayStep`, `valueToIndex`, `indexToValue`, `sleepTimerShouldFire`, `powerSaveShouldSleep`, `timerRemainingMs`, `formatCountdownMMSS`, `volumeAdjust`, `effectiveVolume`, and the **top-level tag/sleep/powersave FSM** (`jukeboxStep`). The FSM tests cover tag arrival, removal debounce, sleep-timer-fired suppression, power-save entry, NFC-suppressed-wake, and a full sleep-timer recovery scenario end-to-end. What's NOT covered (and needs on-target verification): the I2S setup, the SD-backed `playWav` streaming loop, the encoder ISR + button debounce state machine, the management GUI, the web server.
+What's covered: `uidToStr`, `lookupTag`, `parseWavHeaderBuffer`, `parseWavMetaBuffer`, `findCanonicalListInfo`, `canonicalListFieldOffsets`, `buildCanonicalListInfo`, `writeCanonicalField`, `wavDurationSeconds`, `grayStep`, `valueToIndex`, `indexToValue`, `sleepTimerShouldFire`, `powerSaveShouldSleep`, `timerRemainingMs`, `formatCountdownMMSS`, `volumeAdjust`, `effectiveVolume`, `rgb565hex` (theme color conversion), and the **top-level tag/sleep/powersave FSM** (`jukeboxStep`). The FSM tests cover tag arrival, removal debounce, sleep-timer-fired suppression, power-save entry, NFC-suppressed-wake, and a full sleep-timer recovery scenario end-to-end. What's NOT covered (and needs on-target verification): the I2S setup, the SD-backed `playWav` streaming loop, the encoder ISR + button debounce state machine, the management GUI, the web server.
 
 ### State machine architecture
 

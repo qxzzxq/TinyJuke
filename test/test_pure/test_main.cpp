@@ -20,6 +20,7 @@
 #include "timer_logic.h"
 #include "volume_logic.h"
 #include "jukebox_state.cpp"
+#include "theme.h"
 
 // ----------------------------------------------------------------
 //  uidToStr — colon-separated uppercase hex
@@ -991,6 +992,23 @@ void test_fsm_full_sleep_timer_recovery_scenario() {
 }
 
 // ----------------------------------------------------------------
+//  rgb565hex — 0xRRGGBB (24-bit) -> RGB565 (5-6-5)
+// ----------------------------------------------------------------
+
+void test_rgb565_primaries_and_extremes() {
+  TEST_ASSERT_EQUAL_HEX16(0x0000, rgb565hex(0x000000));
+  TEST_ASSERT_EQUAL_HEX16(0xFFFF, rgb565hex(0xFFFFFF));
+  TEST_ASSERT_EQUAL_HEX16(0xF800, rgb565hex(0xFF0000));  // red   -> top 5 bits
+  TEST_ASSERT_EQUAL_HEX16(0x07E0, rgb565hex(0x00FF00));  // green -> mid 6 bits
+  TEST_ASSERT_EQUAL_HEX16(0x001F, rgb565hex(0x0000FF));  // blue  -> low 5 bits
+}
+
+void test_rgb565_truncates_low_bits() {
+  // Channels are truncated (not rounded): R keeps 5 MSB, G 6 MSB, B 5 MSB.
+  TEST_ASSERT_EQUAL_HEX16(0x8E2D, rgb565hex(0x8FC46B));  // Bamboo Moss accent
+}
+
+// ----------------------------------------------------------------
 //  Unity entry point
 // ----------------------------------------------------------------
 
@@ -999,6 +1017,9 @@ void tearDown() {}
 
 int main() {
   UNITY_BEGIN();
+
+  RUN_TEST(test_rgb565_primaries_and_extremes);
+  RUN_TEST(test_rgb565_truncates_low_bits);
 
   RUN_TEST(test_uid_to_str_simple);
   RUN_TEST(test_uid_to_str_pads_low_nibble);

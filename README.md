@@ -81,7 +81,7 @@ The KY-040 module has built-in 10k pull-up resistors. GPIO 34 and 36 are input-o
 - **Click** (short press) to save volume (jukebox) or select/confirm (menu)
 - **Hold** (long press, >600ms) to enter the management menu (jukebox) or go back (menu)
 
-The menu provides access to Web Server, Bluetooth, Volume, Brightness, Power Saving, Sleep Timer, Version (firmware version plus build mode), and Reboot. Reboot shows a confirmation screen: hold the encoder to reboot, click or rotate to cancel. The Volume screen has two parameters, Volume and Max Volume. In jukebox mode Max Volume is a scale factor: the volume bar keeps its full 0-100% range and the actual loudness is volume × max volume (so 80% volume at 50% max gives 40%). In Bluetooth mode it acts as a hard cap on the volume, including the phone's volume slider. Rotate to adjust the highlighted parameter, click to switch between them, hold to save both (`/volume.cfg`, `/maxvolume.cfg`). Brightness uses a white bar with the same layout as volume and is persisted to `/brightness.cfg`. Power Saving turns off the display after a configurable idle period (Off / 5 / 15 / 30 / 60 minutes; the 1-minute option only appears in `DEV_MODE` builds) and is persisted to `/powersave.cfg`. Sleep Timer stops audio playback after the configured duration (Off / 15 / 30 / 60 / 120 minutes; the 1-minute option only appears in `DEV_MODE` builds) and is persisted to `/sleeptimer.cfg`.
+The menu provides access to Web Management, Bluetooth Mode, Volume, Brightness, Color Theme, Power Saving, Sleep Timer, Version (firmware version plus build mode), and Reboot. Reboot shows a confirmation screen: hold the encoder to reboot, click or rotate to cancel. The Volume screen has two parameters, Volume and Max Volume. In jukebox mode Max Volume is a scale factor: the volume bar keeps its full 0-100% range and the actual loudness is volume × max volume (so 80% volume at 50% max gives 40%). In Bluetooth mode it acts as a hard cap on the volume, including the phone's volume slider. Rotate to adjust the highlighted parameter, click to switch between them, hold to save both (`/volume.cfg`, `/maxvolume.cfg`). Brightness uses a white bar with the same layout as volume and is persisted to `/brightness.cfg`. Color Theme recolors the entire UI: rotate to cycle through a set of dark palettes (Bamboo Moss, Deep Ocean, Slate, Iris Violet, Gilded Amber, Sunset Orange) with instant live preview, click or hold to save (`/theme.cfg`); the default is Bamboo Moss. Power Saving turns off the display after a configurable idle period (Off / 5 / 15 / 30 / 60 minutes; the 1-minute option only appears in `DEV_MODE` builds) and is persisted to `/powersave.cfg`. Sleep Timer stops audio playback after the configured duration (Off / 15 / 30 / 60 / 120 minutes; the 1-minute option only appears in `DEV_MODE` builds) and is persisted to `/sleeptimer.cfg`.
 
 MAX98357A configuration pins:
 - **GAIN**: tie to GND for 12 dB and control volume in software. Leaving the pin floating is unreliable (it is a high-impedance input, so noise can produce random gain at power-up).
@@ -145,7 +145,8 @@ Changes are written to `/tags.json` on the SD card immediately.
 ├── maxvolume.cfg                 # Persisted max-volume ceiling (plain text, 0-100)
 ├── brightness.cfg                # Persisted brightness level (plain text, 0-100)
 ├── powersave.cfg                  # Persisted power save timeout (plain text, minutes)
-└── sleeptimer.cfg                # Persisted audio sleep timer (plain text, minutes)
+├── sleeptimer.cfg                # Persisted audio sleep timer (plain text, minutes)
+└── theme.cfg                     # Persisted UI color-theme index (plain text)
 ```
 
 `tags.json` maps each tag UID to a music file. Optional fields provide album art and metadata:
@@ -201,7 +202,7 @@ All fields except `file` are optional. `img` paths are relative to `/img/` on th
 
 Milestone 4 in progress. Added: Bluetooth A2DP sink (speaker) mode with AVRCP metadata display, encoder volume control, sleep-timer + power-save integration, an RFID tag-detected prompt that hands off to jukebox playback, web-based music management (list / edit WAV metadata / delete with tag cascade), OTA firmware updates from the web UI (16 MB partition table with dual app slots), and a max-volume setting configurable from the Volume screen (loudness scale factor in jukebox mode, hard cap in Bluetooth mode).
 
-Prior milestones: web-based tag management, WAV + image upload, browser-side MP3/M4A/AAC/OGG/FLAC → WAV conversion with embedded-art extraction, runtime volume control, encoder-driven GUI with Brightness / Power Saving / Sleep Timer / Version screens, BMP album art (240×240, scaled in PSRAM), tag hot-swap detection, and amp-touch-noise mitigation via I2S priming.
+Prior milestones: web-based tag management, WAV + image upload, browser-side MP3/M4A/AAC/OGG/FLAC → WAV conversion with embedded-art extraction, runtime volume control, encoder-driven GUI with Brightness / Color Theme / Power Saving / Sleep Timer / Version screens, BMP album art (240×240, scaled in PSRAM), tag hot-swap detection, and amp-touch-noise mitigation via I2S priming.
 
 ## License
 

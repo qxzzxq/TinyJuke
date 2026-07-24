@@ -249,6 +249,10 @@ void setup() {
   // 2. Init SD + load tags.json
   initSDAndLoadTags();
 
+  // 2.5 Load saved color theme (falls back to default if SD/file absent) so
+  //     the boot screen already paints in the chosen palette.
+  loadTheme();
+
   // 3. Boot screen (drawn with backlight off to avoid power-on noise)
   if (!sdReady) {
     drawSDErrorScreen();

@@ -115,10 +115,13 @@
 #endif
 
 // --- Version ---
-#define VERSION_STRING       "v1.8.2"
+#define VERSION_STRING       "v1.9.0"
 
 // --- Menu ---
-#define MENU_ITEM_COUNT      8
+#define MENU_ITEM_COUNT      9
+
+// --- Color theme (default index into the THEMES[] table in theme.cpp) ---
+#define THEME_DEFAULT        0   // Bamboo Moss
 
 // --- Web server ---
 #define WIFI_SSID     "TinyJuke-Setup"
@@ -128,12 +131,8 @@
 // Base prefix; the advertised name appends the last 4 hex of the MAC (TinyJuke-XXXX).
 #define BT_DEVICE_NAME "TinyJuke"
 
-// --- Colors (RGB565, dark modern theme) ---
-#define C_BG        0x0865   // #0A0E1A — very dark navy
-#define C_SURFACE   0x10C7   // #111A2E — slightly lighter surface
-#define C_TEXT      0xFFFF   // #FFFFFF — white
-#define C_MUTED     0x6B4D   // #6B7B8D — muted blue-gray
-#define C_ACCENT    0x46F2   // #4ADE80 — vibrant green
-#define C_DIM       0x4228   // #455A6E — dim secondary
-#define C_RED       0xF9A6   // #F87171 — soft red
-#define C_LINE      0x2169   // #1E293B — subtle divider
+// --- Colors ---
+// The C_* palette is now a runtime-switchable theme (RGB565), declared as
+// globals in theme.h and defined/loaded in theme.cpp. Draw code keeps using
+// the C_* names unchanged; the active theme is persisted to /theme.cfg.
+#include "theme.h"
