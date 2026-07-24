@@ -23,6 +23,7 @@ void drawBrightnessScreen(int level);
 void drawPowerSaveScreen(int minutes);
 void drawSleepTimerScreen(int minutes);
 void drawVersionScreen();
+void drawThemeScreen(int index);
 void drawWebServerScreen(int connections);
 void drawRebootConfirmScreen();
 void drawRebootingScreen();

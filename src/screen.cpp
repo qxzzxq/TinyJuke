@@ -42,7 +42,7 @@ static void drawHeader(const char *title, const char *leftHint) {
 }
 
 static void drawHintBar(const char *hint) {
-  gfx.setTextColor(C_MUTED);
+  gfx.setTextColor(C_HINT);
   gfx.setTextSize(1);
   int16_t w = textWidth(hint);
   gfx.setCursor((gfx.width() - w) / 2, gfx.height() - 15);
@@ -303,12 +303,12 @@ void drawSDErrorScreen() {
 //  Menu screen
 // ================================================================
 
-static const char *MENU_ITEMS[] = { "Web Server", "Bluetooth", "Volume", "Brightness", "Power Saving", "Sleep Timer", "Version", "Reboot" };
+static const char *MENU_ITEMS[] = { "Web Management", "Bluetooth Mode", "Volume", "Brightness", "Color Theme", "Power Saving", "Sleep Timer", "Version", "Reboot" };
 
 void drawMenuScreen(int selected) {
   drawHeader("Menu", "");
-  // 7 items at itemH=32 fit in startY=44..(44+7*32)=268, leaving room for the hint bar.
-  const int startY = 44, itemH = 32;
+  // 9 items at itemH=28 fit in startY=44..(44+9*28)=296, leaving room for the hint bar.
+  const int startY = 44, itemH = 28;
 
   for (int i = 0; i < MENU_ITEM_COUNT; i++) {
     int y = startY + i * itemH;
@@ -346,7 +346,7 @@ void drawBrightnessScreen(int level) {
   snprintf(pct, sizeof(pct), "%d%%", level);
   centerText(pct, 180, C_TEXT, 3);
 
-  drawHintBar("turn to adjust \267 click to save");
+  drawHintBar("turn to adjust - click to save");
   s_brightnessDrawn = level;
 }
 
@@ -410,7 +410,7 @@ void drawVolumeScreen(int level, int maxLevel, bool adjustingMax) {
   drawVolumeSectionBar(MAX_BAR_Y, maxLevel, -1, C_TEXT);
   drawVolumeSectionPct(MAX_PCT_Y, maxLevel);
 
-  drawHintBar("click to switch \267 hold to save");
+  drawHintBar("click to switch - hold to save");
 
   s_volumeDrawn = level;
   s_maxVolDrawn = maxLevel;
@@ -538,7 +538,7 @@ void drawBluetoothScreen(bool connected, const char *deviceName, const char *pee
 
   updateBluetoothVolume(volume);
 
-  drawHintBar("turn=vol \267 click=settings \267 hold=exit");
+  drawHintBar("turn=vol - click=settings - hold=exit");
 }
 
 void updateBluetoothVolume(int volume) {
@@ -634,7 +634,7 @@ void clearPlaybackVolumeOverlay() {
 // ================================================================
 
 void updateMenuSelection(int oldSel, int newSel) {
-  const int startY = 44, itemH = 32;
+  const int startY = 44, itemH = 28;
 
   // Deselect old
   int yo = startY + oldSel * itemH;
@@ -739,7 +739,7 @@ void drawPowerSaveScreen(int minutes) {
   gfx.setCursor((gfx.width() - lineW) / 2, 202);
   gfx.print(line2);
 
-  drawHintBar("turn to change \267 click to save");
+  drawHintBar("turn to change - click to save");
   s_powerSaveDrawn = idx;
 }
 
@@ -774,7 +774,7 @@ void drawSleepTimerScreen(int minutes) {
   int idx = sleepTimerToIndex(minutes);
   centerText(SLEEP_LABELS[idx], 140, C_TEXT, 3);
 
-  drawHintBar("turn to change \267 click to save");
+  drawHintBar("turn to change - click to save");
   s_sleepDrawn = idx;
 }
 
@@ -819,6 +819,46 @@ void drawVersionScreen() {
 }
 
 // ================================================================
+//  Color theme screen
+// ================================================================
+//
+// The screen itself is the preview: the header/background/hint bar already
+// paint in the active palette. On top we add the theme name (in the accent),
+// a position indicator, a swatch row of every role, and a sample card so
+// text-on-surface is visible too.
+
+void drawThemeScreen(int index) {
+  drawHeader("Color Theme", "back");
+
+  centerText(themeName(index), 88, C_ACCENT, 3);
+
+  char pos[12];
+  snprintf(pos, sizeof(pos), "%d / %d", index + 1, themeCount());
+  centerText(pos, 128, C_MUTED, 2);
+
+  // Swatch row: every role color as a chip, outlined so dark tones stay visible.
+  const uint16_t chips[] = { C_BG, C_SURFACE, C_TEXT, C_MUTED, C_ACCENT,
+                             C_DIM, C_RED, C_LINE, C_HINT };
+  const int n = sizeof(chips) / sizeof(chips[0]);
+  const int sw = 20, gap = 3;
+  const int totalW = n * sw + (n - 1) * gap;
+  const int x0 = (gfx.width() - totalW) / 2;
+  const int y0 = 166;
+  for (int i = 0; i < n; i++) {
+    int x = x0 + i * (sw + gap);
+    gfx.fillRect(x, y0, sw, sw, chips[i]);
+    gfx.drawRect(x, y0, sw, sw, C_MUTED);
+  }
+
+  // Sample card — previews accent title + muted subtitle on a surface fill.
+  gfx.fillRect(20, 208, gfx.width() - 40, 48, C_SURFACE);
+  centerText("Now Playing", 216, C_ACCENT, 2);
+  centerText("Artist - Track", 238, C_MUTED, 1);
+
+  drawHintBar("turn to change - click to save");
+}
+
+// ================================================================
 //  Reboot confirm / rebooting screens
 // ================================================================
 
@@ -826,7 +866,7 @@ void drawRebootConfirmScreen() {
   drawHeader("Reboot", "back");
   centerText("Reboot?", 90, C_TEXT, 3);
   centerText("Hold to confirm", 150, C_MUTED, 2);
-  drawHintBar("click to cancel \267 hold to reboot");
+  drawHintBar("click to cancel - hold to reboot");
 }
 
 void drawRebootingScreen() {
