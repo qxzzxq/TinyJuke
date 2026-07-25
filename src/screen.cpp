@@ -99,7 +99,7 @@ static int  s_playbackVolDrawn = -1;
 void drawWaitingScreen() {
   gfx.fillScreen(C_BG);
   centerText("TinyJuke", 100, C_TEXT, 3);
-  centerText("scan a tag", 170, C_MUTED, 2);
+  centerText("insert a tag", 170, C_MUTED, 2);
   drawHintBar("hold for menu");
 }
 
