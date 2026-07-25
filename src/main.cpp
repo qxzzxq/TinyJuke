@@ -63,6 +63,13 @@ static void initSDAndLoadTags() {
   sdReady = true;
   Serial.println("OK");
 
+  // Fresh cards lack these dirs; create them so the listing/upload paths
+  // don't later SD.open() a missing dir (which logs the ESP32 VFS
+  // "does not exist, no permits for creation" error). SD.mkdir() is a
+  // silent no-op when the directory already exists.
+  SD.mkdir("/music");
+  SD.mkdir("/img");
+
   File f = SD.open("/tags.json", FILE_READ);
   if (!f) {
     Serial.println("tags.json not found.");

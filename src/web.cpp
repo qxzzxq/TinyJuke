@@ -246,6 +246,11 @@ function imgUrl(name){
 return name?'/img?name='+encodeURIComponent(name):'';
 }
 
+function optHas(sel,val){
+for(var i=0;i<sel.options.length;i++){if(sel.options[i].value===val)return true;}
+return false;
+}
+
 async function loadTags(){
 var r=await fetch('/api/tags');
 var d=await r.json();
@@ -524,6 +529,8 @@ sel.innerHTML='';
 for(var i=0;i<files.length;i++){
 sel.innerHTML+='<option value="music/'+esc(files[i])+'">'+esc(files[i])+'</option>';
 }
+// keep this tag's current file selectable even if it's hidden from listings (e.g. a dotfile) so saving an edit can't silently remap it
+if(file&&!optHas(sel,file)){sel.innerHTML+='<option value="'+esc(file)+'">'+esc(file)+'</option>';}
 for(var j=0;j<sel.options.length;j++){
 if(sel.options[j].value===file){sel.selectedIndex=j;break;}
 }
@@ -537,6 +544,7 @@ imgSel.innerHTML='<option value="">-- none --</option>';
 for(var k=0;k<images.length;k++){
 imgSel.innerHTML+='<option value="'+esc(images[k])+'">'+esc(images[k])+'</option>';
 }
+if(img&&!optHas(imgSel,img)){imgSel.innerHTML+='<option value="'+esc(img)+'">'+esc(img)+'</option>';}
 for(var l=0;l<imgSel.options.length;l++){
 if(imgSel.options[l].value===img){imgSel.selectedIndex=l;break;}
 }
@@ -1073,6 +1081,11 @@ static bool isTmpName(const char *base) {
   return n > 4 && strcmp(base + n - 4, ".tmp") == 0;
 }
 
+// Hidden/dotfile (e.g. macOS "._" resource forks, ".DS_Store") — hide from listings.
+static bool isHiddenName(const char *base) {
+  return base[0] == '.';
+}
+
 // ================================================================
 //  GET /api/tags  →  {"tags":[{uid,file,title,artist,album,img},...]}
 // ================================================================
@@ -1113,7 +1126,7 @@ static void handleApiFiles() {
         const char *name = f.name();
         const char *base = strrchr(name, '/');
         if (base) base++; else base = name;
-        if (!isTmpName(base)) {
+        if (!isTmpName(base) && !isHiddenName(base)) {
           if (!first) json += ",";
           first = false;
           json += jsonStr(base);
@@ -1142,9 +1155,11 @@ static void handleApiImages() {
         const char *name = f.name();
         const char *base = strrchr(name, '/');
         if (base) base++; else base = name;
-        if (!first) json += ",";
-        first = false;
-        json += jsonStr(base);
+        if (!isHiddenName(base)) {
+          if (!first) json += ",";
+          first = false;
+          json += jsonStr(base);
+        }
       }
       f.close();
     }
@@ -1263,7 +1278,7 @@ static void handleApiMusic() {
         const char *name = f.name();
         const char *base = strrchr(name, '/');
         if (base) base++; else base = name;
-        if (isTmpName(base)) { f.close(); continue; }
+        if (isTmpName(base) || isHiddenName(base)) { f.close(); continue; }
 
         size_t n = f.read(wavScanBuf, sizeof(wavScanBuf));
         WavHeader hdr = {};

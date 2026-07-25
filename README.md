@@ -184,7 +184,7 @@ All fields except `file` are optional. `img` paths are relative to `/img/` on th
 **Pins** are defined in `src/config.h`. The code is split into modules under `src/`: `config.h`, `audio.cpp`, `wav_parser.cpp`, `screen.cpp`, `tags.cpp`, `tag_utils.cpp`, `encoder.cpp`, `encoder_gray.h`, `value_array.h`, `gui.cpp`, `web.cpp`, `bluetooth.cpp`, `main.cpp`.
 
 **Flash steps:**
-1. Format SD card as FAT32, copy `music/`, `img/` (optional), and `tags.json` to the root
+1. Format SD card as FAT32, copy `music/`, `img/` (optional), and `tags.json` to the root. `music/` and `img/` are created automatically on first boot if they don't exist, so a blank card also works.
 2. Run `~/.platformio/penv/bin/pio run -t upload` to build and flash over USB. The D32 Pro ships in 4 MB and 16 MB flash variants with identical markings (check with `esptool.py flash_id`). Use `-e lolin_d32_pro-4mb` for a 4 MB board, since the default 16 MB partition table boot-loops on a 4 MB chip. For the custom WROVER-E PCB, build with `-e wrover_e`.
 3. Run `~/.platformio/penv/bin/pio device monitor` to see boot diagnostics and scanned UIDs at 115200 baud
 
