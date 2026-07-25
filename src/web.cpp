@@ -290,9 +290,12 @@ var btn=document.getElementById('btn-fw-install');
 var st=document.getElementById('fw-status');
 var pr=document.getElementById('fw-progress');
 btn.disabled=true;
-pr.style.display='block';pr.value=0;
-st.textContent='Uploading firmware…';
+st.textContent='Verifying PIN…';
 try{
+var vr=await fetch('/api/verify-pin?pin='+encodeURIComponent(pin));
+if(!vr.ok){var vm='Invalid PIN';try{var vj=await vr.json();if(vj&&vj.error)vm=vj.error;}catch(e){}throw new Error(vm);}
+st.textContent='Uploading firmware…';
+pr.style.display='block';pr.value=0;
 await uploadBlob('/update?size='+f.size+'&pin='+encodeURIComponent(pin),f,f.name,function(p){pr.value=p;});
 st.textContent='Installed. Device is rebooting — start the Web Server from the device menu to reconnect.';
 toast('Firmware installed','ok');
@@ -1602,6 +1605,27 @@ const char *getWebPin() {
   return s_webPin;
 }
 
+// GET /api/verify-pin?pin=XXXX — lets the web UI confirm the OTA PIN *before*
+// it streams a multi-MB firmware image, so a wrong PIN fails fast instead of
+// after the whole upload crosses the network. handleFwUpdate still re-checks
+// the PIN server-side and shares this same lockout counter, so skipping this
+// pre-check (e.g. a direct POST) gains an attacker nothing.
+static void handleVerifyPin() {
+  if (s_pinFailures >= PIN_MAX_FAILURES) {
+    sendError(429, "Too many failed PINs - restart the web server on the device");
+    return;
+  }
+  if (server.arg("pin") != s_webPin) {
+    s_pinFailures++;
+    Serial.printf("[ota] ERROR: invalid PIN via verify (attempt %u/%u)\n",
+                  (unsigned)s_pinFailures, (unsigned)PIN_MAX_FAILURES);
+    sendError(403, "Invalid PIN (shown on the device screen)");
+    return;
+  }
+  s_pinFailures = 0;
+  sendOK();
+}
+
 static void handleFwUpdate() {
   HTTPUpload &up = server.upload();
 
@@ -1924,6 +1948,7 @@ void initWebServer(PN532 &nfc) {
     server.on("/img",          HTTP_GET,    handleImg);
     server.on("/upload",       HTTP_POST,   handleUploadComplete, handleUpload);
     server.on("/upload-img",   HTTP_POST,   handleUploadImgComplete, handleUploadImg);
+    server.on("/api/verify-pin", HTTP_GET,   handleVerifyPin);
     server.on("/update",       HTTP_POST,   handleFwUpdateComplete, handleFwUpdate);
   }
 
