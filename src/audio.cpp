@@ -6,6 +6,7 @@
 #include "encoder.h"
 #include "timer_logic.h"
 #include "volume_logic.h"
+#include "storage.h"  // sdOpenRead()
 #include <driver/i2s.h>
 
 bool audioPlaying = false;
@@ -110,7 +111,9 @@ void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t ta
     path[sizeof(path) - 1] = '\0';
   }
 
-  File f = SD.open(path);
+  // A tag can outlive the file it points at; report that once, ourselves,
+  // rather than letting the VFS layer log it as an error first.
+  File f = sdOpenRead(path);
   if (!f) { Serial.printf("Open failed: %s\n", path); return; }
 
   WavHeader hdr;
@@ -262,7 +265,7 @@ void parseWavMeta(const char *filepath, WavMeta &meta) {
     path[sizeof(path) - 1] = '\0';
   }
 
-  File f = SD.open(path);
+  File f = sdOpenRead(path);
   if (!f) return;
 
   // LIST INFO is conventionally near the front of the file; cap scan to 64 KB.

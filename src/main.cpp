@@ -70,7 +70,9 @@ static void initSDAndLoadTags() {
   SD.mkdir("/music");
   SD.mkdir("/img");
 
-  File f = SD.open("/tags.json", FILE_READ);
+  // A card with no tags yet is a normal state, not an error — sdOpenRead()
+  // keeps the VFS "does not exist" log line out of the boot output.
+  File f = sdOpenRead("/tags.json");
   if (!f) {
     Serial.println("tags.json not found.");
     return;

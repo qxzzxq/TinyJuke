@@ -115,7 +115,7 @@
 #endif
 
 // --- Version ---
-#define VERSION_STRING       "v1.9.3"
+#define VERSION_STRING       "v1.9.4"
 
 // --- Menu ---
 #define MENU_ITEM_COUNT      9
