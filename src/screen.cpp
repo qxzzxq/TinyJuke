@@ -7,6 +7,7 @@
 #include "audio.h"
 #include "timer_logic.h"
 #include "web.h"  // getWebPin() for the web server screen
+#include "storage.h"  // sdOpenRead()
 #include <SD.h>
 #include <esp_heap_caps.h>
 
@@ -126,7 +127,9 @@ void drawUnknownTagScreen(const uint8_t *uid, uint8_t uidLen) {
 // Decode a 24-bit BMP, return heap-allocated RGB565 buffer + dimensions.
 // Caller must free(). Returns nullptr on failure.
 static uint16_t *loadBMP(const char *path, int *outW, int *outH) {
-  File f = SD.open(path);
+  // A tag may name art that was never uploaded or has since been deleted;
+  // the caller falls back to the text-only layout, so keep it off the log.
+  File f = sdOpenRead(path);
   if (!f) return nullptr;
 
   uint8_t h[54];
