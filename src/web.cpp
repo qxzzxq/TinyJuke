@@ -1073,6 +1073,11 @@ static bool isTmpName(const char *base) {
   return n > 4 && strcmp(base + n - 4, ".tmp") == 0;
 }
 
+// Hidden/dotfile (e.g. macOS "._" resource forks, ".DS_Store") — hide from listings.
+static bool isHiddenName(const char *base) {
+  return base[0] == '.';
+}
+
 // ================================================================
 //  GET /api/tags  →  {"tags":[{uid,file,title,artist,album,img},...]}
 // ================================================================
@@ -1113,7 +1118,7 @@ static void handleApiFiles() {
         const char *name = f.name();
         const char *base = strrchr(name, '/');
         if (base) base++; else base = name;
-        if (!isTmpName(base)) {
+        if (!isTmpName(base) && !isHiddenName(base)) {
           if (!first) json += ",";
           first = false;
           json += jsonStr(base);
@@ -1142,9 +1147,11 @@ static void handleApiImages() {
         const char *name = f.name();
         const char *base = strrchr(name, '/');
         if (base) base++; else base = name;
-        if (!first) json += ",";
-        first = false;
-        json += jsonStr(base);
+        if (!isHiddenName(base)) {
+          if (!first) json += ",";
+          first = false;
+          json += jsonStr(base);
+        }
       }
       f.close();
     }
@@ -1263,7 +1270,7 @@ static void handleApiMusic() {
         const char *name = f.name();
         const char *base = strrchr(name, '/');
         if (base) base++; else base = name;
-        if (isTmpName(base)) { f.close(); continue; }
+        if (isTmpName(base) || isHiddenName(base)) { f.close(); continue; }
 
         size_t n = f.read(wavScanBuf, sizeof(wavScanBuf));
         WavHeader hdr = {};
