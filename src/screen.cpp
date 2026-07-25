@@ -99,7 +99,7 @@ static int  s_playbackVolDrawn = -1;
 void drawWaitingScreen() {
   gfx.fillScreen(C_BG);
   centerText("TinyJuke", 100, C_TEXT, 3);
-  centerText("scan a tag", 170, C_MUTED, 2);
+  centerText("insert a tag", 170, C_MUTED, 2);
   drawHintBar("hold for menu");
 }
 
@@ -340,7 +340,7 @@ void drawBrightnessScreen(int level) {
   gfx.fillRect(barX, barY, barW, barH, C_LINE);
   int fillW = (barW - 4) * level / 100;
   if (fillW > 0)
-    gfx.fillRect(barX + 2, barY + 2, fillW, barH - 4, C_TEXT);
+    gfx.fillRect(barX + 2, barY + 2, fillW, barH - 4, C_ACCENT);
 
   char pct[8];
   snprintf(pct, sizeof(pct), "%d%%", level);
@@ -690,7 +690,7 @@ void updateBrightnessDisplay(int level) {
   }
 
   if (fillW > 0)
-    gfx.fillRect(barX + 2, barY + 2, fillW, barH - 4, C_TEXT);
+    gfx.fillRect(barX + 2, barY + 2, fillW, barH - 4, C_ACCENT);
 
   // Erase and redraw percentage (text at y=180, size 3 = 24px tall → 180..203)
   gfx.fillRect(0, 172, gfx.width(), 38, C_BG);
@@ -721,23 +721,9 @@ void drawPowerSaveScreen(int minutes) {
   int idx = powerSaveToIndex(minutes);
   centerText(POWERSAVE_LABELS[idx], 120, C_TEXT, 3);
 
-  gfx.setTextColor(C_MUTED);
-  gfx.setTextSize(1);
-  int16_t lineW;
-  int16_t x1, y1;
-  uint16_t tw, th;
-
-  const char *line1 = "Screen turns off after a";
-  gfx.getTextBounds(line1, 0, 0, &x1, &y1, &tw, &th);
-  lineW = (int16_t)tw;
-  gfx.setCursor((gfx.width() - lineW) / 2, 190);
-  gfx.print(line1);
-
-  const char *line2 = "period of inactivity";
-  gfx.getTextBounds(line2, 0, 0, &x1, &y1, &tw, &th);
-  lineW = (int16_t)tw;
-  gfx.setCursor((gfx.width() - lineW) / 2, 202);
-  gfx.print(line2);
+  // Description in size-2 text (rewrapped so each line fits 240px at this size).
+  centerText("Screen turns off", 190, C_MUTED, 2);
+  centerText("when idle", 212, C_MUTED, 2);
 
   drawHintBar("turn to change - click to save");
   s_powerSaveDrawn = idx;
@@ -773,6 +759,10 @@ void drawSleepTimerScreen(int minutes) {
 
   int idx = sleepTimerToIndex(minutes);
   centerText(SLEEP_LABELS[idx], 140, C_TEXT, 3);
+
+  // Description in size-2 text, matching the Power Saving screen.
+  centerText("Audio stops when", 190, C_MUTED, 2);
+  centerText("the timer ends", 212, C_MUTED, 2);
 
   drawHintBar("turn to change - click to save");
   s_sleepDrawn = idx;
