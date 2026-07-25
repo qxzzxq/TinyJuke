@@ -72,9 +72,9 @@ TickResult jukeboxStep(JukeboxState s, TickInput in) {
     //   under correct sequencing (sleepStopped is only true with tagPresent),
     //   so we ignore defensively.
   } else if (s.tagPresent) {
-    // Tag missing this tick. Require 3 consecutive misses before accepting
-    // removal — guards against PN532 read glitches.
-    if (++s.tagAbsentCount >= 3) {
+    // Tag missing this tick. Require several consecutive misses before
+    // accepting removal — guards against PN532 read glitches.
+    if (++s.tagAbsentCount >= TAG_ABSENT_CONFIRM) {
       s.tagPresent = false;
       s.sleepStopped = false;
       s.tagAbsentCount = 0;

@@ -115,10 +115,25 @@
 #endif
 
 // --- Version ---
-#define VERSION_STRING       "v1.9.3"
+#define VERSION_STRING       "v1.10.0"
 
 // --- Menu ---
 #define MENU_ITEM_COUNT      9
+
+// --- NFC polling ---
+// Waiting-screen poll period. readPassiveTargetID blocks for this long when no
+// tag is present, so it sets the loop cadence — short enough to keep the hold
+// indicator and tag detection responsive. TAG_ABSENT_CONFIRM in
+// jukebox_state.h is sized against this value; change both together.
+#define NFC_POLL_MS         100
+
+// --- UI animation ---
+// Motion is only used where it carries information: how far a hold has
+// progressed, where the selection moved, how a value changed.
+#define ANIM_FRAME_MS        16   // ~60 fps gate on animation frames
+#define ANIM_MENU_MS        130   // selector slide between menu rows
+#define ANIM_BAR_MS          90   // volume / brightness bar fill
+#define HOLD_HINT_DELAY_MS  200   // hold progress appears after this much press
 
 // --- Color theme (default index into the THEMES[] table in theme.cpp) ---
 #define THEME_DEFAULT        0   // Bamboo Moss

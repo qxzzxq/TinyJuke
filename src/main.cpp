@@ -20,6 +20,7 @@
 #include "storage.h"
 #include "timer_logic.h"
 #include "jukebox_state.h"
+#include "anim.h"
 
 #include <PN532_HSU.h>
 #include <PN532.h>
@@ -319,11 +320,29 @@ void loop() {
   if (sleepTimerFired) sleepTimerFired = false;  // consume edge
   in.powerSaveMinutes  = powerSaveMinutes;
 
+  // "Hold for menu" is the one gesture on this screen, so show its progress.
+  // Drawn right after readEncoder() so the button state is fresh; every screen
+  // this path can be showing paints C_BG in the indicator's band.
+  uint32_t heldMs   = encHoldMs();
+  bool     idleWait = (s_state.mode == Mode::Waiting) && !s_state.tagPresent;
+  if (idleWait) {
+    int pct = holdProgressPct(heldMs, HOLD_HINT_DELAY_MS, ENC_HOLD_MS);
+    if (pct >= 0) drawHoldProgress(pct);
+    else          clearHoldProgress();
+  }
+
   // Don't waste an NFC poll while sleeping with a tag still on the reader.
   uint8_t uid[10] = {0};
   uint8_t uidLength = 0;
-  if (!(s_state.mode == Mode::Sleeping && s_state.sleepStopped)) {
-    uint16_t timeout = (s_state.mode == Mode::Sleeping) ? 100 : 300;
+  // Skip the blocking poll entirely for the whole press on the idle waiting
+  // screen: that frees the loop to run at full rate, so the hold indicator
+  // animates smoothly instead of stepping once per poll, and the hold
+  // threshold stops depending on where the press lands in the poll cycle.
+  // Safe because no tag is present, so the removal debounce isn't armed and a
+  // skipped poll can't be misread as a tag disappearing.
+  bool holdingIdle = idleWait && encPressActive();
+  if (!holdingIdle && !(s_state.mode == Mode::Sleeping && s_state.sleepStopped)) {
+    uint16_t timeout = (s_state.mode == Mode::Sleeping) ? 100 : NFC_POLL_MS;
     in.nfcFound = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, timeout);
     if (uidLength > 10) uidLength = 10;
   }

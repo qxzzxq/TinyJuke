@@ -8,6 +8,7 @@
 #include "bluetooth.h"
 #include "timer_logic.h"
 #include "volume_logic.h"
+#include "anim.h"
 
 // ----------------------------------------------------------------
 //  State
@@ -48,6 +49,19 @@ static int       btVolDrawn = -1;
 static bool      btConnDrawn = false;
 
 // ----------------------------------------------------------------
+//  Animation state
+// ----------------------------------------------------------------
+//
+// Values the UI animates toward. The true values (volumeLevel, menuSel, ...)
+// are applied immediately on the encoder event; only their on-screen
+// representation is interpolated, so nothing ever waits on an animation.
+
+static uint32_t animFrameMs = 0;   // last frame timestamp (frame-rate gate)
+static AnimI32  selAnim;           // menu selector bar, in pixels
+static int      selDrawnY = -1;    // last painted selector y (-1 = not drawn)
+static AnimI32  volAnim, maxVolAnim, brtAnim;
+
+// ----------------------------------------------------------------
 //  Draw current screen
 // ----------------------------------------------------------------
 
@@ -56,6 +70,19 @@ static void drawBluetoothCurrent() {
                       btTrackTitle(), btTrackArtist(), volumeLevel);
   btVolDrawn  = volumeLevel;
   btConnDrawn = btIsConnected();
+}
+
+// Settle every animation at the value the screen was just painted with, so a
+// frame left over from the previous screen can't paint over the new one.
+static void animReset() {
+  uint32_t now = millis();
+  animSettle(selAnim, menuRowY(menuSel), now);
+  animSettle(volAnim, volumeLevel, now);
+  animSettle(maxVolAnim, maxVolumeLevel, now);
+  animSettle(brtAnim, brightnessLevel, now);
+  // drawMenuScreen() already painted the selector at the selected row.
+  selDrawnY = (scr == Screen::MENU) ? menuRowY(menuSel) : -1;
+  clearHoldProgress();
 }
 
 static void redraw() {
@@ -92,6 +119,52 @@ static void redraw() {
       break;
     case Screen::BLUETOOTH_TAG_PROMPT:
       drawBluetoothTagPromptScreen();
+      break;
+  }
+  animReset();
+}
+
+// Retarget the selector at the newly selected row, starting from wherever it
+// currently is rather than from the old row — a fast spin then chases the
+// selection continuously instead of snapping back on every detent.
+static void startSelectorSlide() {
+  uint32_t now = millis();
+  animStart(selAnim, animValue(selAnim, now), menuRowY(menuSel), now, ANIM_MENU_MS);
+}
+
+// Advance in-flight animations and paint one frame. Called every guiLoop
+// iteration *before* the no-event early return — that early return is what
+// otherwise makes idle-time rendering impossible. It also runs straight after
+// readEncoder(), so the button state encHoldMs() reads is fresh.
+static void guiAnimTick() {
+  uint32_t now = millis();
+  if (now - animFrameMs < ANIM_FRAME_MS) return;
+  animFrameMs = now;
+
+  // --- Long-press progress (every screen that accepts a hold) ---
+  // encHoldMs() returns 0 once ENC_HOLD has fired, so the bar clears itself
+  // the moment the gesture completes.
+  int holdPct = holdProgressPct(encHoldMs(), HOLD_HINT_DELAY_MS, ENC_HOLD_MS);
+  if (holdPct >= 0) drawHoldProgress(holdPct);
+  else              clearHoldProgress();   // no-op when nothing is drawn
+
+  // --- Per-screen value animations ---
+  switch (scr) {
+    case Screen::MENU: {
+      int y = animValue(selAnim, now);
+      if (y != selDrawnY) {
+        drawMenuSelector(selDrawnY, y);
+        selDrawnY = y;
+      }
+      break;
+    }
+    case Screen::VOLUME:
+      updateVolumeBars(animValue(volAnim, now), animValue(maxVolAnim, now));
+      break;
+    case Screen::BRIGHTNESS:
+      updateBrightnessBar(animValue(brtAnim, now));
+      break;
+    default:
       break;
   }
 }
@@ -173,6 +246,7 @@ void guiLoop() {
 
   // --- Encoder events ---
   int ev = readEncoder();
+  guiAnimTick();
   if (ev == ENC_NONE) return;
   resetActivityTimer();  // any interaction resets the idle timer
 
@@ -241,10 +315,12 @@ void guiLoop() {
         int prev = menuSel;
         menuSel = (menuSel + ev) % MENU_ITEM_COUNT;
         updateMenuSelection(prev, menuSel);
+        startSelectorSlide();
       } else if (ev < 0) {
         int prev = menuSel;
         menuSel = (menuSel + ev % MENU_ITEM_COUNT + MENU_ITEM_COUNT) % MENU_ITEM_COUNT;
         updateMenuSelection(prev, menuSel);
+        startSelectorSlide();
       } else if (ev == ENC_CLICK) {
         switch (menuSel) {
           case MI_WEB:         {
@@ -295,8 +371,15 @@ void guiLoop() {
       }
 
       if (scr == Screen::VOLUME &&
-          (volumeLevel != oldLevel || maxVolumeLevel != oldMax || volAdjMax != oldAdjMax))
-        updateVolumeDisplay(volumeLevel, maxVolumeLevel, volAdjMax);
+          (volumeLevel != oldLevel || maxVolumeLevel != oldMax || volAdjMax != oldAdjMax)) {
+        // Labels and percentages track the encoder exactly; only the fills ease.
+        updateVolumeText(volumeLevel, maxVolumeLevel, volAdjMax);
+        uint32_t now = millis();
+        if (volumeLevel != oldLevel)
+          animStart(volAnim, animValue(volAnim, now), volumeLevel, now, ANIM_BAR_MS);
+        if (maxVolumeLevel != oldMax)
+          animStart(maxVolAnim, animValue(maxVolAnim, now), maxVolumeLevel, now, ANIM_BAR_MS);
+      }
       break;
     }
 
@@ -328,8 +411,14 @@ void guiLoop() {
       }
 
       if (brightnessLevel != oldLevel) {
-        updateBrightnessDisplay(brightnessLevel);
-        applyBrightness();
+        applyBrightness();   // backlight follows the encoder immediately
+        // Only paint if we're still on this screen: a click can be drained in
+        // the same burst as a rotation, which already switched us to the menu.
+        if (scr == Screen::BRIGHTNESS) {
+          updateBrightnessText(brightnessLevel);
+          uint32_t now = millis();
+          animStart(brtAnim, animValue(brtAnim, now), brightnessLevel, now, ANIM_BAR_MS);
+        }
       }
       break;
     }

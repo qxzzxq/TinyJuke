@@ -18,6 +18,12 @@
 #include <stdint.h>
 #include <stddef.h>
 
+// Consecutive missed NFC reads before a tag is accepted as removed. Sized
+// against the waiting-screen poll period (NFC_POLL_MS in config.h, 100 ms):
+// 9 misses ≈ 900 ms of tolerance, so a brief read glitch or a slightly
+// off-centre tag doesn't stop playback. Change both together.
+static const uint8_t TAG_ABSENT_CONFIRM = 9;
+
 enum class Mode : uint8_t {
   Waiting,   // jukebox idle, display on, ready to detect a tag
   Sleeping,  // display off (power saving)

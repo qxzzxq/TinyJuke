@@ -6,6 +6,7 @@
 #include "encoder.h"
 #include "timer_logic.h"
 #include "volume_logic.h"
+#include "anim.h"
 #include <driver/i2s.h>
 
 bool audioPlaying = false;
@@ -139,6 +140,12 @@ void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t ta
 
   uint32_t volOverlayTimer = 0;
   bool     volOverlayVisible = false;
+  // The overlay bar eases toward the new level while the audio itself follows
+  // volumeLevel immediately — a spin coalesces into one jump, which is where
+  // the easing is actually visible.
+  AnimI32  volBarAnim;
+  animSettle(volBarAnim, volumeLevel, millis());
+  uint32_t volBarFrameMs = 0;
 
   uint32_t lastCountdownUpdate = 0;
   bool     countdownVisible = (sleepTimerMinutes > 0);
@@ -187,9 +194,22 @@ void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t ta
         if (next < 0 || next > 100) break;
         volumeLevel = next;
       }
-      drawPlaybackVolumeOverlay(volumeLevel);
-      volOverlayTimer   = millis();
+      uint32_t now = millis();
+      if (!volOverlayVisible) {
+        // First turn of this burst — draw the bar where it actually is.
+        drawPlaybackVolumeOverlay(volumeLevel);
+        animSettle(volBarAnim, volumeLevel, now);
+      } else {
+        animStart(volBarAnim, animValue(volBarAnim, now), volumeLevel, now, ANIM_BAR_MS);
+      }
+      volOverlayTimer   = now;
       volOverlayVisible = true;
+    }
+    // Advance the eased fill. Frame-gated so this can't compete with SD reads
+    // on the shared VSPI bus any more often than the GUI would.
+    if (volOverlayVisible && millis() - volBarFrameMs >= ANIM_FRAME_MS) {
+      volBarFrameMs = millis();
+      drawPlaybackVolumeOverlay(animValue(volBarAnim, volBarFrameMs));
     }
     if (volOverlayVisible && millis() - volOverlayTimer >= 5000) {
       saveVolume();

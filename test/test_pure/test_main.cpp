@@ -21,6 +21,7 @@
 #include "volume_logic.h"
 #include "jukebox_state.cpp"
 #include "theme.h"
+#include "anim.h"
 
 // ----------------------------------------------------------------
 //  uidToStr — colon-separated uppercase hex
@@ -711,39 +712,53 @@ void test_fsm_arrival_suppressed_when_sleep_stopped() {
 
 // --- Tag removal debounce ----------------------------------------
 
-void test_fsm_tag_removal_requires_three_misses() {
+void test_fsm_tag_removal_requires_full_miss_run() {
   JukeboxState s = jukeboxInitialState(0);
   s.tagPresent = true;
   s.lastActivityMs = 0;
 
-  for (int miss = 1; miss <= 2; miss++) {
+  for (int miss = 1; miss < TAG_ABSENT_CONFIRM; miss++) {
     TickResult r = jukeboxStep(s, baseInput(miss * 100));
     s = r.state;
     TEST_ASSERT_FALSE(hasAction(r.actions, Action::ConfirmTagRemoved));
     TEST_ASSERT_TRUE(s.tagPresent);
     TEST_ASSERT_EQUAL_UINT8(miss, s.tagAbsentCount);
   }
-  // Third consecutive miss confirms removal.
-  TickResult r3 = jukeboxStep(s, baseInput(300));
-  TEST_ASSERT_TRUE(hasAction(r3.actions, Action::ConfirmTagRemoved));
-  TEST_ASSERT_FALSE(r3.state.tagPresent);
-  TEST_ASSERT_FALSE(r3.state.sleepStopped);
-  TEST_ASSERT_EQUAL_UINT8(0, r3.state.tagAbsentCount);
+  // The final consecutive miss confirms removal.
+  TickResult rN = jukeboxStep(s, baseInput(TAG_ABSENT_CONFIRM * 100));
+  TEST_ASSERT_TRUE(hasAction(rN.actions, Action::ConfirmTagRemoved));
+  TEST_ASSERT_FALSE(rN.state.tagPresent);
+  TEST_ASSERT_FALSE(rN.state.sleepStopped);
+  TEST_ASSERT_EQUAL_UINT8(0, rN.state.tagAbsentCount);
+}
+
+void test_fsm_removal_tolerance_covers_a_read_glitch() {
+  // The miss count exists to ride out PN532 read glitches, and it is sized
+  // against the ~100 ms waiting-screen poll period (NFC_POLL_MS). If those two
+  // drift apart, a tag that flickers for a moment would stop playback.
+  TEST_ASSERT_TRUE(TAG_ABSENT_CONFIRM * 100 >= 800);
 }
 
 void test_fsm_intermittent_glitch_does_not_remove_tag() {
-  // miss, miss, found, miss, miss — only resets to 1 after the found, never reaches 3.
+  // A found read anywhere in the run resets the counter, so an intermittent
+  // tag never accumulates enough consecutive misses to be called removed.
   JukeboxState s = jukeboxInitialState(0);
   s.tagPresent = true;
-  TickResult r;
-  r = jukeboxStep(s, baseInput(10));                                s = r.state;
-  r = jukeboxStep(s, baseInput(20));                                s = r.state;
-  TickInput inFound = baseInput(30); inFound.nfcFound = true;
-  r = jukeboxStep(s, inFound);                                      s = r.state;
-  TEST_ASSERT_EQUAL_UINT8(0, s.tagAbsentCount);
-  r = jukeboxStep(s, baseInput(40));                                s = r.state;
-  r = jukeboxStep(s, baseInput(50));                                s = r.state;
-  TEST_ASSERT_FALSE(hasAction(r.actions, Action::ConfirmTagRemoved));
+  TickResult r = {};
+  uint32_t t = 10;
+
+  for (int round = 0; round < 3; round++) {
+    for (int miss = 0; miss < TAG_ABSENT_CONFIRM - 1; miss++, t += 10) {
+      r = jukeboxStep(s, baseInput(t));
+      s = r.state;
+      TEST_ASSERT_FALSE(hasAction(r.actions, Action::ConfirmTagRemoved));
+    }
+    TickInput inFound = baseInput(t); t += 10;
+    inFound.nfcFound = true;
+    r = jukeboxStep(s, inFound);
+    s = r.state;
+    TEST_ASSERT_EQUAL_UINT8(0, s.tagAbsentCount);
+  }
   TEST_ASSERT_TRUE(s.tagPresent);
 }
 
@@ -753,7 +768,7 @@ void test_fsm_removal_clears_sleep_stopped() {
   JukeboxState s = jukeboxInitialState(0);
   s.tagPresent = true;
   s.sleepStopped = true;
-  s.tagAbsentCount = 2;
+  s.tagAbsentCount = TAG_ABSENT_CONFIRM - 1;   // one miss short of confirmed
   TickResult r = jukeboxStep(s, baseInput(500));
   TEST_ASSERT_TRUE(hasAction(r.actions, Action::ConfirmTagRemoved));
   TEST_ASSERT_FALSE(r.state.sleepStopped);
@@ -977,8 +992,8 @@ void test_fsm_full_sleep_timer_recovery_scenario() {
   TEST_ASSERT_EQUAL(Mode::Waiting, (int)s.mode);
   TEST_ASSERT_TRUE(s.sleepStopped);  // still suppressed until removal
 
-  // 8) Tag removed for 3 consecutive misses.
-  for (int i = 0; i < 3; i++) {
+  // 8) Tag removed for a full run of consecutive misses.
+  for (int i = 0; i < TAG_ABSENT_CONFIRM; i++) {
     TickInput f = baseInput(2000 + 5UL * 60000UL + 3000 + (uint32_t)(i * 100));
     r = jukeboxStep(s, f); s = r.state;
   }
@@ -1006,6 +1021,155 @@ void test_rgb565_primaries_and_extremes() {
 void test_rgb565_truncates_low_bits() {
   // Channels are truncated (not rounded): R keeps 5 MSB, G 6 MSB, B 5 MSB.
   TEST_ASSERT_EQUAL_HEX16(0x8E2D, rgb565hex(0x8FC46B));  // Bamboo Moss accent
+}
+
+// ----------------------------------------------------------------
+//  Animation helpers — fixed-point progress, easing, interpolation
+// ----------------------------------------------------------------
+
+void test_anim_progress_spans_zero_to_full() {
+  TEST_ASSERT_EQUAL_INT32(0,          animProgress(0, 100));
+  TEST_ASSERT_EQUAL_INT32(500,        animProgress(50, 100));
+  TEST_ASSERT_EQUAL_INT32(ANIM_SCALE, animProgress(100, 100));
+}
+
+void test_anim_progress_clamps_past_duration() {
+  // A frame that lands late must not overshoot — callers use the result
+  // directly as an interpolation factor.
+  TEST_ASSERT_EQUAL_INT32(ANIM_SCALE, animProgress(150, 100));
+  TEST_ASSERT_EQUAL_INT32(ANIM_SCALE, animProgress(0xFFFFFFFFUL, 100));
+}
+
+void test_anim_progress_zero_duration_is_complete() {
+  // Zero duration means "no animation" — settle immediately rather than
+  // dividing by zero.
+  TEST_ASSERT_EQUAL_INT32(ANIM_SCALE, animProgress(0, 0));
+}
+
+void test_ease_out_cubic_endpoints_are_exact() {
+  // Endpoints must be exact or the animation visibly snaps at the end.
+  TEST_ASSERT_EQUAL_INT32(0,          easeOutCubic(0));
+  TEST_ASSERT_EQUAL_INT32(ANIM_SCALE, easeOutCubic(ANIM_SCALE));
+  TEST_ASSERT_EQUAL_INT32(0,          easeOutCubic(-50));
+  TEST_ASSERT_EQUAL_INT32(ANIM_SCALE, easeOutCubic(ANIM_SCALE + 50));
+}
+
+void test_ease_out_cubic_front_loads_the_motion() {
+  // 1-(1-t)^3: at the halfway point most of the distance is already covered.
+  // That front-loading is what makes the motion read as "snappy".
+  TEST_ASSERT_EQUAL_INT32(875, easeOutCubic(500));
+  TEST_ASSERT_EQUAL_INT32(271, easeOutCubic(100));
+  TEST_ASSERT_TRUE(easeOutCubic(500) > 500);
+}
+
+void test_ease_out_cubic_is_monotonic() {
+  // A non-monotonic curve would make the highlight jitter backwards.
+  int32_t prev = -1;
+  for (int32_t q = 0; q <= ANIM_SCALE; q += 10) {
+    int32_t v = easeOutCubic(q);
+    TEST_ASSERT_TRUE(v >= prev);
+    prev = v;
+  }
+}
+
+void test_anim_lerp_endpoints_and_midpoint() {
+  TEST_ASSERT_EQUAL_INT32(0,   animLerp(0, 100, 0));
+  TEST_ASSERT_EQUAL_INT32(100, animLerp(0, 100, ANIM_SCALE));
+  TEST_ASSERT_EQUAL_INT32(50,  animLerp(0, 100, 500));
+  // Menu rows: item 0 (y=44) to item 8 (y=268).
+  TEST_ASSERT_EQUAL_INT32(156, animLerp(44, 268, 500));
+}
+
+void test_anim_lerp_handles_descending_range() {
+  // Scrolling up means to < from; the delta must stay signed.
+  TEST_ASSERT_EQUAL_INT32(50,  animLerp(100, 0, 500));
+  TEST_ASSERT_EQUAL_INT32(156, animLerp(268, 44, 500));
+  TEST_ASSERT_EQUAL_INT32(-25, animLerp(-50, 0, 500));
+}
+
+void test_anim_value_interpolates_then_settles() {
+  AnimI32 a;
+  animStart(a, 44, 268, 1000, 130);   // menu row 0 -> row 8 over 130 ms
+  TEST_ASSERT_EQUAL_INT32(44,  animValue(a, 1000));
+  TEST_ASSERT_EQUAL_INT32(240, animValue(a, 1065));   // eased, not linear (156)
+  TEST_ASSERT_EQUAL_INT32(268, animValue(a, 1130));
+  TEST_ASSERT_EQUAL_INT32(268, animValue(a, 5000));   // stays put afterwards
+}
+
+void test_anim_done_reports_completion() {
+  AnimI32 a;
+  animStart(a, 0, 100, 1000, 130);
+  TEST_ASSERT_FALSE(animDone(a, 1000));
+  TEST_ASSERT_FALSE(animDone(a, 1129));
+  TEST_ASSERT_TRUE(animDone(a, 1130));
+  TEST_ASSERT_TRUE(animDone(a, 9999));
+}
+
+void test_anim_retarget_mid_flight_starts_from_current_value() {
+  // A fast encoder spin retargets while the previous move is still running.
+  // Restarting from the *current* value is what keeps the motion continuous —
+  // restarting from the old row endpoint would visibly jump backwards.
+  AnimI32 a;
+  animStart(a, 44, 72, 1000, 130);
+  int32_t mid = animValue(a, 1065);
+  TEST_ASSERT_EQUAL_INT32(68, mid);           // 44 + 28*0.875
+
+  animStart(a, mid, 100, 1065, 130);
+  TEST_ASSERT_EQUAL_INT32(68,  animValue(a, 1065));   // no discontinuity
+  TEST_ASSERT_EQUAL_INT32(100, animValue(a, 1195));
+}
+
+void test_anim_survives_millis_wrap() {
+  // Elapsed time uses unsigned subtraction, so an animation started just
+  // before the 49-day millis() rollover keeps running across it.
+  const uint32_t nearMax = 0xFFFFFFFFUL - 49;   // 50 ms before wrap
+  AnimI32 a;
+  animStart(a, 0, 200, nearMax, 200);
+  TEST_ASSERT_EQUAL_INT32(0, animValue(a, nearMax));
+  // 50 ms later the counter has wrapped to 50 → 100 ms elapsed → q=500.
+  TEST_ASSERT_EQUAL_INT32(175, animValue(a, 50));    // 200 * 0.875
+  TEST_ASSERT_FALSE(animDone(a, 50));
+  TEST_ASSERT_TRUE(animDone(a, 150));
+}
+
+void test_anim_settle_is_an_idle_animation() {
+  AnimI32 a;
+  animSettle(a, 156, 5000);
+  TEST_ASSERT_EQUAL_INT32(156, animValue(a, 5000));
+  TEST_ASSERT_EQUAL_INT32(156, animValue(a, 6000));
+  TEST_ASSERT_TRUE(animDone(a, 5000));
+}
+
+// --- Long-press indicator ------------------------------------------
+
+void test_hold_progress_hidden_until_hint_delay() {
+  // A normal click must never flash the indicator, so anything shorter than
+  // the hint delay reports "hidden" rather than 0%.
+  TEST_ASSERT_EQUAL_INT(-1, holdProgressPct(0, 200, 600));
+  TEST_ASSERT_EQUAL_INT(-1, holdProgressPct(199, 200, 600));
+  TEST_ASSERT_EQUAL_INT(0,  holdProgressPct(200, 200, 600));
+}
+
+void test_hold_progress_is_linear_to_the_threshold() {
+  // Linear, not eased: the bar reports how much longer the user must hold.
+  TEST_ASSERT_EQUAL_INT(25,  holdProgressPct(300, 200, 600));
+  TEST_ASSERT_EQUAL_INT(50,  holdProgressPct(400, 200, 600));
+  TEST_ASSERT_EQUAL_INT(75,  holdProgressPct(500, 200, 600));
+  TEST_ASSERT_EQUAL_INT(100, holdProgressPct(600, 200, 600));
+}
+
+void test_hold_progress_saturates_past_threshold() {
+  TEST_ASSERT_EQUAL_INT(100, holdProgressPct(5000, 200, 600));
+}
+
+void test_hold_progress_survives_degenerate_config() {
+  // hintDelay >= holdMs would divide by zero; once the delay is reached there
+  // is no span left to ramp over, so report complete instead.
+  TEST_ASSERT_EQUAL_INT(100, holdProgressPct(600, 600, 600));
+  TEST_ASSERT_EQUAL_INT(100, holdProgressPct(800, 800, 600));
+  // The hint delay still gates: below it, nothing is shown either way.
+  TEST_ASSERT_EQUAL_INT(-1, holdProgressPct(500, 600, 600));
+  TEST_ASSERT_EQUAL_INT(-1, holdProgressPct(700, 800, 600));
 }
 
 // ----------------------------------------------------------------
@@ -1088,7 +1252,8 @@ int main() {
   RUN_TEST(test_fsm_tag_arrival_triggers_playback);
   RUN_TEST(test_fsm_no_retrigger_while_tag_present);
   RUN_TEST(test_fsm_arrival_suppressed_when_sleep_stopped);
-  RUN_TEST(test_fsm_tag_removal_requires_three_misses);
+  RUN_TEST(test_fsm_tag_removal_requires_full_miss_run);
+  RUN_TEST(test_fsm_removal_tolerance_covers_a_read_glitch);
   RUN_TEST(test_fsm_intermittent_glitch_does_not_remove_tag);
   RUN_TEST(test_fsm_removal_clears_sleep_stopped);
   RUN_TEST(test_fsm_sleep_timer_fired_sets_sleep_stopped);
@@ -1106,6 +1271,25 @@ int main() {
   RUN_TEST(test_fsm_hold_enters_menu_from_waiting);
   RUN_TEST(test_fsm_encoder_rotation_resets_idle_clock);
   RUN_TEST(test_fsm_full_sleep_timer_recovery_scenario);
+
+  RUN_TEST(test_anim_progress_spans_zero_to_full);
+  RUN_TEST(test_anim_progress_clamps_past_duration);
+  RUN_TEST(test_anim_progress_zero_duration_is_complete);
+  RUN_TEST(test_ease_out_cubic_endpoints_are_exact);
+  RUN_TEST(test_ease_out_cubic_front_loads_the_motion);
+  RUN_TEST(test_ease_out_cubic_is_monotonic);
+  RUN_TEST(test_anim_lerp_endpoints_and_midpoint);
+  RUN_TEST(test_anim_lerp_handles_descending_range);
+  RUN_TEST(test_anim_value_interpolates_then_settles);
+  RUN_TEST(test_anim_done_reports_completion);
+  RUN_TEST(test_anim_retarget_mid_flight_starts_from_current_value);
+  RUN_TEST(test_anim_survives_millis_wrap);
+  RUN_TEST(test_anim_settle_is_an_idle_animation);
+
+  RUN_TEST(test_hold_progress_hidden_until_hint_delay);
+  RUN_TEST(test_hold_progress_is_linear_to_the_threshold);
+  RUN_TEST(test_hold_progress_saturates_past_threshold);
+  RUN_TEST(test_hold_progress_survives_degenerate_config);
 
   return UNITY_END();
 }
