@@ -340,7 +340,7 @@ void drawBrightnessScreen(int level) {
   gfx.fillRect(barX, barY, barW, barH, C_LINE);
   int fillW = (barW - 4) * level / 100;
   if (fillW > 0)
-    gfx.fillRect(barX + 2, barY + 2, fillW, barH - 4, C_TEXT);
+    gfx.fillRect(barX + 2, barY + 2, fillW, barH - 4, C_ACCENT);
 
   char pct[8];
   snprintf(pct, sizeof(pct), "%d%%", level);
@@ -690,7 +690,7 @@ void updateBrightnessDisplay(int level) {
   }
 
   if (fillW > 0)
-    gfx.fillRect(barX + 2, barY + 2, fillW, barH - 4, C_TEXT);
+    gfx.fillRect(barX + 2, barY + 2, fillW, barH - 4, C_ACCENT);
 
   // Erase and redraw percentage (text at y=180, size 3 = 24px tall → 180..203)
   gfx.fillRect(0, 172, gfx.width(), 38, C_BG);
