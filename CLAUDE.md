@@ -77,7 +77,7 @@ README.md             — User-facing docs (wiring, build steps, SD layout)
 |------------------|-----------------------------------------------|----------------------|
 | Arduino_GFX      | `moononournation/Arduino_GFX.git`             | TFT display (ST7789) |
 | ArduinoJson      | `bblanchon/ArduinoJson @ ^7`                  | Parse `/tags.json`   |
-| ESP32-A2DP       | `pschatzmann/ESP32-A2DP.git`                  | Bluetooth A2DP sink  |
+| ESP32-A2DP       | `pschatzmann/ESP32-A2DP.git#v1.8.11`          | Bluetooth A2DP sink  |
 | PN532 + PN532_HSU| Bundled in `lib/`                             | NFC reader           |
 | SD               | Built-in (Arduino ESP32 framework)            | SD card access       |
 | WiFi + WebServer | Built-in (Arduino ESP32 framework)            | AP mode + REST API   |
