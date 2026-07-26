@@ -141,6 +141,9 @@ void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t ta
 
   uint32_t lastNfcCheck = 0;
   uint8_t  tagAbsentCount = 0;
+  // Cleared until the tag is actually read during this playback; misses before
+  // that mean "still being placed" rather than "removed".
+  bool     tagConfirmed = false;
 
   uint32_t volOverlayTimer = 0;
   bool     volOverlayVisible = false;
@@ -247,18 +250,15 @@ void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t ta
     if (millis() - lastNfcCheck >= NFC_PLAYBACK_POLL_MS) {
       lastNfcCheck = millis();
       uint8_t u[10]; uint8_t uLen = 0;
-      if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 30)) {
-        // audioStartTime is stamped when the tag was detected, so this also
-        // covers the settle window in which misses are not yet meaningful.
-        if (tagAbsentCount < 255) tagAbsentCount++;
-        if (playbackShouldStop(tagAbsentCount, millis() - audioStartTime))
-          stopRequested = true;
-      } else {
-        tagAbsentCount = 0;
-        // Detect tag swap: different UID → stop and let main loop pick up new tag
-        if (uLen != tagUidLen || memcmp(u, tagUid, uLen) != 0)
-          stopRequested = true;
-      }
+      bool seen = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen,
+                                          NFC_PLAYBACK_READ_MS);
+      // audioStartTime is stamped when the tag was detected, so it doubles as
+      // the clock for the "hasn't landed yet" backstop.
+      if (tagMissTick(tagAbsentCount, tagConfirmed, seen, millis() - audioStartTime))
+        stopRequested = true;
+      // Detect tag swap: different UID → stop and let main loop pick up new tag
+      if (seen && (uLen != tagUidLen || memcmp(u, tagUid, uLen) != 0))
+        stopRequested = true;
     }
   }
 

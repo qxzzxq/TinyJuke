@@ -1200,35 +1200,78 @@ void test_tag_presence_periods_stay_within_their_windows() {
   TEST_ASSERT_TRUE(TAG_ABSENT_PLAYING_MS < TAG_ABSENT_IDLE_MS);
 }
 
-void test_playback_ignores_misses_while_the_tag_settles() {
+void test_playback_ignores_misses_while_the_tag_is_landing() {
   // Observed on hardware: one detection, then playWav() stopping on its own
-  // miss run and the track restarting from zero — twice — before the tag came
-  // to rest. A miss run inside the settle window must not stop playback, no
-  // matter how long it is.
-  TEST_ASSERT_FALSE(playbackShouldStop(3,   0));
-  TEST_ASSERT_FALSE(playbackShouldStop(10,  500));
-  TEST_ASSERT_FALSE(playbackShouldStop(255, TAG_SETTLE_MS - 1));
+  // miss run and the track restarting from zero before the tag came to rest.
+  uint8_t misses = 0; bool confirmed = false;
+  for (uint32_t t = 0; t < TAG_SETTLE_MS; t += NFC_PLAYBACK_POLL_MS)
+    TEST_ASSERT_FALSE(tagMissTick(misses, confirmed, false, t));
+  TEST_ASSERT_FALSE(confirmed);
 }
 
-void test_playback_stops_on_a_miss_run_after_settling() {
-  // Past the settle window a miss run means the tag really is gone.
+void test_early_misses_are_discarded_not_banked() {
+  // The regression that made the first attempt at this only *reduce* the
+  // restart rate: misses accumulated during the landing window, so the
+  // counter was already at the threshold when the window closed and the very
+  // next miss stopped playback. After a long unreadable run the tag must
+  // still get a full fresh debounce.
   const uint8_t need = tagAbsentMisses(TAG_ABSENT_PLAYING_MS, NFC_PLAYBACK_POLL_MS);
-  TEST_ASSERT_TRUE(playbackShouldStop(need,     TAG_SETTLE_MS));
-  TEST_ASSERT_TRUE(playbackShouldStop(need + 1, TAG_SETTLE_MS + 5000));
-  TEST_ASSERT_FALSE(playbackShouldStop(need - 1, TAG_SETTLE_MS + 5000));
+  uint8_t misses = 0; bool confirmed = false;
+
+  for (uint32_t t = 0; t < TAG_SETTLE_MS; t += 10)
+    tagMissTick(misses, confirmed, false, t);      // long unreadable run
+  TEST_ASSERT_EQUAL_UINT8(0, misses);              // banked nothing
+
+  tagMissTick(misses, confirmed, true, TAG_SETTLE_MS);  // tag lands
+  for (uint8_t i = 1; i < need; i++)
+    TEST_ASSERT_FALSE(tagMissTick(misses, confirmed, false, TAG_SETTLE_MS + i));
+  TEST_ASSERT_TRUE(tagMissTick(misses, confirmed, false, TAG_SETTLE_MS + need));
 }
 
-void test_playback_never_stops_on_one_miss() {
-  // The single-miss case that caused the original stop/restart behaviour.
-  TEST_ASSERT_FALSE(playbackShouldStop(1, 0));
-  TEST_ASSERT_FALSE(playbackShouldStop(1, TAG_SETTLE_MS));
-  TEST_ASSERT_FALSE(playbackShouldStop(1, 999999));
+void test_playback_debounces_normally_once_the_tag_is_seen() {
+  // After the first successful read, removal must be responsive again — the
+  // landing grace does not linger for the rest of the track.
+  const uint8_t need = tagAbsentMisses(TAG_ABSENT_PLAYING_MS, NFC_PLAYBACK_POLL_MS);
+  uint8_t misses = 0; bool confirmed = false;
+
+  tagMissTick(misses, confirmed, true, 10);        // seen almost immediately
+  TEST_ASSERT_TRUE(confirmed);
+  for (uint8_t i = 1; i < need; i++)
+    TEST_ASSERT_FALSE(tagMissTick(misses, confirmed, false, 10 + i));
+  TEST_ASSERT_TRUE(tagMissTick(misses, confirmed, false, 10 + need));
 }
 
-void test_settle_window_is_shorter_than_the_shortest_track() {
-  // Sanity: the grace period only delays a genuine stop, it must not be so
-  // long that lifting a tag leaves audio running for an obvious stretch.
+void test_playback_stops_for_a_tag_that_never_lands() {
+  // A tag waved past the reader is detected once but never read again. The
+  // TAG_SETTLE_MS backstop has to stop playback rather than wait forever.
+  uint8_t misses = 0; bool confirmed = false;
+  bool stopped = false;
+  for (uint32_t t = 0; t < TAG_SETTLE_MS + TAG_ABSENT_PLAYING_MS + 1000;
+       t += NFC_PLAYBACK_POLL_MS)
+    if (tagMissTick(misses, confirmed, false, t)) { stopped = true; break; }
+  TEST_ASSERT_TRUE(stopped);
+}
+
+void test_a_single_miss_never_stops_playback() {
+  uint8_t misses = 0; bool confirmed = true;   // already established
+  TEST_ASSERT_FALSE(tagMissTick(misses, confirmed, false, 999999));
+}
+
+void test_intermittent_reads_never_accumulate_to_a_stop() {
+  // miss, seen, miss, seen ... a flaky-but-present tag must keep playing.
+  uint8_t misses = 0; bool confirmed = false;
+  for (uint32_t t = 0; t < 60000; t += NFC_PLAYBACK_POLL_MS) {
+    TEST_ASSERT_FALSE(tagMissTick(misses, confirmed, false, t));
+    TEST_ASSERT_FALSE(tagMissTick(misses, confirmed, true,  t + 1));
+  }
+}
+
+void test_settle_backstop_is_not_absurdly_long() {
+  // It only delays a genuine stop; audio must not run on for ages after a
+  // tag is lifted before it was ever read.
   TEST_ASSERT_TRUE(TAG_SETTLE_MS <= 2000);
+  // And each in-playback read must fit comfortably inside its own interval.
+  TEST_ASSERT_TRUE(NFC_PLAYBACK_READ_MS < NFC_PLAYBACK_POLL_MS);
 }
 
 // --- Long-press indicator ------------------------------------------
@@ -1382,10 +1425,13 @@ int main() {
   RUN_TEST(test_tag_absent_misses_rounds_up_not_down);
   RUN_TEST(test_tag_absent_misses_saturates_at_uint8);
   RUN_TEST(test_tag_presence_periods_stay_within_their_windows);
-  RUN_TEST(test_playback_ignores_misses_while_the_tag_settles);
-  RUN_TEST(test_playback_stops_on_a_miss_run_after_settling);
-  RUN_TEST(test_playback_never_stops_on_one_miss);
-  RUN_TEST(test_settle_window_is_shorter_than_the_shortest_track);
+  RUN_TEST(test_playback_ignores_misses_while_the_tag_is_landing);
+  RUN_TEST(test_early_misses_are_discarded_not_banked);
+  RUN_TEST(test_playback_debounces_normally_once_the_tag_is_seen);
+  RUN_TEST(test_playback_stops_for_a_tag_that_never_lands);
+  RUN_TEST(test_a_single_miss_never_stops_playback);
+  RUN_TEST(test_intermittent_reads_never_accumulate_to_a_stop);
+  RUN_TEST(test_settle_backstop_is_not_absurdly_long);
 
   RUN_TEST(test_hold_progress_hidden_until_hint_delay);
   RUN_TEST(test_hold_progress_is_linear_to_the_threshold);
