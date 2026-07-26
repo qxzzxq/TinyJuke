@@ -139,10 +139,14 @@ void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t ta
   uint32_t remaining = hdr.dataSize;
   i2s_start(I2S_NUM_0);
 
+  // Cap the blocking NFC read to what this file's sample rate leaves in the
+  // DMA ring, so a high-rate WAV can't underrun on every poll (tag_presence.h).
+  const uint16_t nfcReadMs = (uint16_t)nfcReadBudgetMs(hdr.sampleRate, NFC_RING_USE_PCT);
+
   // Stamp "now" rather than 0: at 0 the first poll fires after a single 2 KB
-  // write, when only ~11.6 ms of audio is queued instead of the ~185 ms the
-  // DMA ring holds once primed — a blocking read there underruns audibly at
-  // the start of every track. One full interval is ample to fill the ring.
+  // write, when only ~11.6 ms of audio is queued instead of the full ring — a
+  // blocking read there underruns audibly at the start of every track. One
+  // full interval is ample to fill the ring.
   uint32_t lastNfcCheck = millis();
   uint8_t  tagAbsentCount = 0;
   // Cleared until the tag is actually read during this playback; misses before
@@ -257,7 +261,7 @@ void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t ta
       lastNfcCheck = millis();
       uint8_t u[10]; uint8_t uLen = 0;
       bool seen = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen,
-                                          NFC_PLAYBACK_READ_MS);
+                                          nfcReadMs);
       // audioStartTime is stamped when the tag was detected, so it doubles as
       // the clock for the "hasn't landed yet" backstop.
       if (tagMissTick(tagAbsentCount, tagConfirmed, seen, millis() - audioStartTime))

@@ -212,6 +212,24 @@ static void runPlayback(const uint8_t *uid, uint8_t uidLength) {
       }
       delay(30);
     }
+
+    // Dismissed by click, hold or timeout. tagPresent is still true for the
+    // tag we were showing, and the FSM only tracks *presence* — so if the tag
+    // was swapped while dismissing (the animation skip above suppresses reads
+    // for the whole press), the replacement reads as "same tag still there"
+    // and never triggers playback until it is physically removed. One last
+    // read settles which it is.
+    {
+      uint8_t u[10]; uint8_t uLen = 0;
+      if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 200)) {
+        s_state.tagPresent = false;              // gone while we were dismissing
+      } else if (uLen <= 10) {
+        char currentUid[32]; uidToStr(u, uLen, currentUid);
+        if (strcmp(currentUid, shownUid) != 0)
+          s_state.tagPresent = false;            // swapped — let it re-trigger
+      }
+    }
+    clearHoldProgress();
     drawWaitingScreen();
     return;
   }

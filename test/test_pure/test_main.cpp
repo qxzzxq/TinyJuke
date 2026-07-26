@@ -1289,6 +1289,37 @@ void test_intermittent_reads_never_accumulate_to_a_stop() {
   }
 }
 
+void test_nfc_read_budget_fits_the_dma_ring_at_every_rate() {
+  // The read blocks the streaming loop, so it must fit inside the audio
+  // already queued. The ring holds a fixed frame count, so its duration
+  // shrinks as the rate rises — at 192 kHz it is only ~43 ms, less than the
+  // 50 ms nominal read, and a fixed timeout would underrun on every poll.
+  const uint32_t rates[] = {8000, 22050, 44100, 48000, 96000, 176400, 192000};
+  for (size_t i = 0; i < sizeof(rates) / sizeof(rates[0]); i++) {
+    uint32_t ringMs = (8UL * 1024UL * 1000UL) / rates[i];
+    uint32_t budget = nfcReadBudgetMs(rates[i], NFC_RING_USE_PCT);
+    TEST_ASSERT_TRUE(budget <= NFC_PLAYBACK_READ_MS);   // never exceeds nominal
+    TEST_ASSERT_TRUE(budget < ringMs);                  // leaves refill headroom
+    TEST_ASSERT_TRUE(budget >= 1);                      // always makes progress
+  }
+}
+
+void test_nfc_read_budget_is_unchanged_at_normal_rates() {
+  // Everything the web UI produces is 44.1 kHz, and the whole point of the
+  // widening was to reach 50 ms there — the cap must not claw that back.
+  TEST_ASSERT_EQUAL_UINT32(NFC_PLAYBACK_READ_MS, nfcReadBudgetMs(44100, NFC_RING_USE_PCT));
+  TEST_ASSERT_EQUAL_UINT32(NFC_PLAYBACK_READ_MS, nfcReadBudgetMs(48000, NFC_RING_USE_PCT));
+  TEST_ASSERT_EQUAL_UINT32(NFC_PLAYBACK_READ_MS, nfcReadBudgetMs(96000, NFC_RING_USE_PCT));
+  // ...and must claw it back where the ring is genuinely too small.
+  TEST_ASSERT_TRUE(nfcReadBudgetMs(192000, NFC_RING_USE_PCT) < NFC_PLAYBACK_READ_MS);
+  TEST_ASSERT_TRUE(nfcReadBudgetMs(176400, NFC_RING_USE_PCT) < NFC_PLAYBACK_READ_MS);
+}
+
+void test_nfc_read_budget_handles_a_bogus_sample_rate() {
+  // A corrupt header could report 0; don't divide by it.
+  TEST_ASSERT_EQUAL_UINT32(NFC_PLAYBACK_READ_MS, nfcReadBudgetMs(0, NFC_RING_USE_PCT));
+}
+
 void test_settle_backstop_is_not_absurdly_long() {
   // It only delays a genuine stop; audio must not run on for ages after a
   // tag is lifted before it was ever read.
@@ -1571,6 +1602,9 @@ int main() {
   RUN_TEST(test_playback_stops_for_a_tag_that_never_lands);
   RUN_TEST(test_a_single_miss_never_stops_playback);
   RUN_TEST(test_intermittent_reads_never_accumulate_to_a_stop);
+  RUN_TEST(test_nfc_read_budget_fits_the_dma_ring_at_every_rate);
+  RUN_TEST(test_nfc_read_budget_is_unchanged_at_normal_rates);
+  RUN_TEST(test_nfc_read_budget_handles_a_bogus_sample_rate);
   RUN_TEST(test_settle_backstop_is_not_absurdly_long);
 
   RUN_TEST(test_hold_progress_hidden_until_hint_delay);

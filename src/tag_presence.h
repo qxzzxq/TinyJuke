@@ -22,13 +22,43 @@ static const uint32_t NFC_REPLAY_POLL_MS   =  50;  // re-poll between repeats
 // Read timeout for the in-playback poll. This is *not* the interval above —
 // it's how long each individual read waits for the reader to answer.
 //
-// It was 30 ms, chosen to keep the streaming loop responsive, but that is not
-// long enough for the PN532 to reliably complete anticollision: a log from
-// the field showed playWav() concluding "absent" on 30 ms reads while the
-// re-poll immediately afterwards found the same stationary tag on a 50 ms
-// read. 50 ms of stall every 150 ms is well inside the ~185 ms of I2S DMA
-// buffering (8 descriptors x 1024 frames at 44.1 kHz), so audio is unaffected.
+// 30 ms was too short for the PN532 to reliably complete anticollision: a log
+// from the field showed playWav() concluding "absent" on 30 ms reads while the
+// re-poll immediately afterwards found the same stationary tag on a 50 ms read.
 static const uint32_t NFC_PLAYBACK_READ_MS =  50;
+
+// ...but the read blocks the streaming loop, so it must also fit inside the
+// audio already queued in the I2S DMA ring, or the ring drains and the track
+// stutters every poll. The ring holds a fixed number of *frames*, so its
+// duration shrinks as the sample rate rises:
+//
+//     44.1 kHz -> ~186 ms      96 kHz -> ~85 ms      192 kHz -> ~43 ms
+//
+// At 44.1 kHz (everything the web UI produces) 50 ms is comfortable, but
+// playWav() honours whatever rate the file declares and passthrough .wav
+// uploads are not resampled — so a 176.4 or 192 kHz file would underrun on
+// every single poll. Derive the cap from the rate instead of assuming 44.1.
+static const uint32_t I2S_DMA_DESCRIPTORS = 8;
+static const uint32_t I2S_DMA_FRAMES      = 1024;
+
+// Longest NFC read that still leaves the ring with headroom, capped at the
+// nominal read time. `ringUsePct` is the share of the ring a single read may
+// consume; the remainder covers refilling it (an SD read plus the volume /
+// mono conversion) before the next poll.
+//
+// Returns at least 1 ms so a poll always makes some progress.
+static inline uint32_t nfcReadBudgetMs(uint32_t sampleRate, uint32_t ringUsePct) {
+  if (sampleRate == 0) return NFC_PLAYBACK_READ_MS;   // corrupt header; use nominal
+  uint32_t ringMs = (I2S_DMA_DESCRIPTORS * I2S_DMA_FRAMES * 1000UL) / sampleRate;
+  uint32_t budget = ringMs * ringUsePct / 100;
+  if (budget < 1) budget = 1;
+  return (budget < NFC_PLAYBACK_READ_MS) ? budget : NFC_PLAYBACK_READ_MS;
+}
+
+// Two thirds: enough headroom to refill, while leaving every rate the web UI
+// can produce (44.1/48 kHz) and even 96 kHz at the full nominal read time.
+// Only 176.4 and 192 kHz, where the ring is under 50 ms, get clamped.
+static const uint32_t NFC_RING_USE_PCT = 66;
 
 // How long a tag must stay unreadable before we accept that it is gone.
 //
