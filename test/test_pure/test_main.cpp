@@ -931,6 +931,27 @@ void test_fsm_hold_enters_menu_from_waiting() {
   TEST_ASSERT_EQUAL(Mode::Waiting, (int)r.state.mode);
 }
 
+void test_fsm_hold_outcome_ignores_nfc_state() {
+  // main.cpp skips the blocking NFC read on the tick a hold fires, so the menu
+  // opens immediately instead of after a dead poll. That is only safe because
+  // the Hold path returns before consulting nfcFound — pin it here so the
+  // skip can't be silently invalidated by a future change to the FSM.
+  for (int found = 0; found < 2; found++) {
+    JukeboxState s = jukeboxInitialState(0);
+    TickInput in = baseInput(1000);
+    in.encoderEvent = EncEvent::Hold;
+    in.nfcFound = (found != 0);
+
+    TickResult r = jukeboxStep(s, in);
+    TEST_ASSERT_TRUE(hasAction(r.actions, Action::EnterMenu));
+    TEST_ASSERT_EQUAL_UINT8(1, r.actions.count);  // nothing else emitted
+    // A tag arrival would otherwise have been registered here; it must not be,
+    // or a skipped poll would change the outcome.
+    TEST_ASSERT_FALSE(r.state.tagPresent);
+    TEST_ASSERT_FALSE(hasAction(r.actions, Action::TriggerPlayback));
+  }
+}
+
 void test_fsm_encoder_rotation_resets_idle_clock() {
   // Even without other actions, rotation should reset lastActivityMs so the
   // idle counter restarts.
@@ -1403,6 +1424,7 @@ int main() {
   RUN_TEST(test_fsm_nfc_does_not_wake_when_sleep_stopped);
   RUN_TEST(test_fsm_sleep_idle_no_event_stays_asleep);
   RUN_TEST(test_fsm_hold_enters_menu_from_waiting);
+  RUN_TEST(test_fsm_hold_outcome_ignores_nfc_state);
   RUN_TEST(test_fsm_encoder_rotation_resets_idle_clock);
   RUN_TEST(test_fsm_full_sleep_timer_recovery_scenario);
 

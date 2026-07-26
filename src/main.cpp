@@ -380,7 +380,16 @@ void loop() {
   // the removal debounce isn't armed and a skipped poll can't be misread as
   // a tag disappearing.
   bool holdingIdle = waiting && !s_state.tagPresent && encPressActive();
-  if (!holdingIdle && !(s_state.mode == Mode::Sleeping && s_state.sleepStopped)) {
+
+  // The poll that produces ENC_HOLD moves the button to its HOLD state, so
+  // encPressActive() is already false by here and the skip above no longer
+  // applies. Skip explicitly on that event too: jukeboxStep() returns on Hold
+  // without ever reading nfcFound, so polling first is a blocking NFC_POLL_MS
+  // of dead time between the indicator completing and the menu appearing.
+  bool holdFired = (in.encoderEvent == EncEvent::Hold);
+
+  if (!holdFired && !holdingIdle &&
+      !(s_state.mode == Mode::Sleeping && s_state.sleepStopped)) {
     uint16_t timeout = (s_state.mode == Mode::Sleeping) ? 100 : NFC_POLL_MS;
     in.nfcFound = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, timeout);
     if (uidLength > 10) uidLength = 10;
