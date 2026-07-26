@@ -6,6 +6,9 @@
 #include "encoder.h"
 #include "timer_logic.h"
 #include "volume_logic.h"
+#include "anim.h"
+#include "storage.h"  // sdOpenRead()
+#include "tag_presence.h"
 #include <driver/i2s.h>
 
 bool audioPlaying = false;
@@ -110,7 +113,9 @@ void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t ta
     path[sizeof(path) - 1] = '\0';
   }
 
-  File f = SD.open(path);
+  // A tag can outlive the file it points at; report that once, ourselves,
+  // rather than letting the VFS layer log it as an error first.
+  File f = sdOpenRead(path);
   if (!f) { Serial.printf("Open failed: %s\n", path); return; }
 
   WavHeader hdr;
@@ -134,11 +139,28 @@ void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t ta
   uint32_t remaining = hdr.dataSize;
   i2s_start(I2S_NUM_0);
 
-  uint32_t lastNfcCheck = 0;
+  // Cap the blocking NFC read to what this file's sample rate leaves in the
+  // DMA ring, so a high-rate WAV can't underrun on every poll (tag_presence.h).
+  const uint16_t nfcReadMs = (uint16_t)nfcReadBudgetMs(hdr.sampleRate, NFC_RING_USE_PCT);
+
+  // Stamp "now" rather than 0: at 0 the first poll fires after a single 2 KB
+  // write, when only ~11.6 ms of audio is queued instead of the full ring — a
+  // blocking read there underruns audibly at the start of every track. One
+  // full interval is ample to fill the ring.
+  uint32_t lastNfcCheck = millis();
   uint8_t  tagAbsentCount = 0;
+  // Cleared until the tag is actually read during this playback; misses before
+  // that mean "still being placed" rather than "removed".
+  bool     tagConfirmed = false;
 
   uint32_t volOverlayTimer = 0;
   bool     volOverlayVisible = false;
+  // The overlay bar eases toward the new level while the audio itself follows
+  // volumeLevel immediately — a spin coalesces into one jump, which is where
+  // the easing is actually visible.
+  AnimI32  volBarAnim;
+  animSettle(volBarAnim, volumeLevel, millis());
+  uint32_t volBarFrameMs = 0;
 
   uint32_t lastCountdownUpdate = 0;
   bool     countdownVisible = (sleepTimerMinutes > 0);
@@ -180,6 +202,7 @@ void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t ta
     // --- Encoder: volume adjustment during playback ---
     int enc = readEncoder();
     if ((enc > 0 && enc < ENC_CLICK) || (enc < 0)) {
+      int prevVolume = volumeLevel;
       int steps = (enc > 0) ? enc : -enc;
       int delta = (enc > 0) ? 1 : -1;
       while (steps-- > 0) {
@@ -187,9 +210,23 @@ void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t ta
         if (next < 0 || next > 100) break;
         volumeLevel = next;
       }
-      drawPlaybackVolumeOverlay(volumeLevel);
-      volOverlayTimer   = millis();
+      uint32_t now = millis();
+      // Reveal the hidden bar at the level it held *before* this turn, so the
+      // first adjustment eases like every later one. Revealing it already at
+      // the new level would leave the common single-adjustment case — and the
+      // big jump of a fast spin — with no animation at all.
+      int from = prevVolume;
+      if (volOverlayVisible) from = animValue(volBarAnim, now);
+      else                   drawPlaybackVolumeOverlay(prevVolume);
+      animStart(volBarAnim, from, volumeLevel, now, ANIM_BAR_MS);
+      volOverlayTimer   = now;
       volOverlayVisible = true;
+    }
+    // Advance the eased fill. Frame-gated so this can't compete with SD reads
+    // on the shared VSPI bus any more often than the GUI would.
+    if (volOverlayVisible && millis() - volBarFrameMs >= ANIM_FRAME_MS) {
+      volBarFrameMs = millis();
+      drawPlaybackVolumeOverlay(animValue(volBarAnim, volBarFrameMs));
     }
     if (volOverlayVisible && millis() - volOverlayTimer >= 5000) {
       saveVolume();
@@ -220,17 +257,18 @@ void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t ta
       break;
     }
 
-    if (millis() - lastNfcCheck >= 150) {
+    if (millis() - lastNfcCheck >= NFC_PLAYBACK_POLL_MS) {
       lastNfcCheck = millis();
       uint8_t u[10]; uint8_t uLen = 0;
-      if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 30)) {
-        if (++tagAbsentCount >= 3) stopRequested = true;
-      } else {
-        tagAbsentCount = 0;
-        // Detect tag swap: different UID → stop and let main loop pick up new tag
-        if (uLen != tagUidLen || memcmp(u, tagUid, uLen) != 0)
-          stopRequested = true;
-      }
+      bool seen = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen,
+                                          nfcReadMs);
+      // audioStartTime is stamped when the tag was detected, so it doubles as
+      // the clock for the "hasn't landed yet" backstop.
+      if (tagMissTick(tagAbsentCount, tagConfirmed, seen, millis() - audioStartTime))
+        stopRequested = true;
+      // Detect tag swap: different UID → stop and let main loop pick up new tag
+      if (seen && (uLen != tagUidLen || memcmp(u, tagUid, uLen) != 0))
+        stopRequested = true;
     }
   }
 
@@ -262,7 +300,7 @@ void parseWavMeta(const char *filepath, WavMeta &meta) {
     path[sizeof(path) - 1] = '\0';
   }
 
-  File f = SD.open(path);
+  File f = sdOpenRead(path);
   if (!f) return;
 
   // LIST INFO is conventionally near the front of the file; cap scan to 64 KB.

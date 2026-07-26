@@ -18,6 +18,13 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#include "tag_presence.h"
+
+// Consecutive missed NFC reads before a tag is accepted as removed, derived
+// from the idle poll period so the two can't drift apart. See tag_presence.h.
+static const uint8_t TAG_ABSENT_CONFIRM =
+    tagAbsentMisses(TAG_ABSENT_IDLE_MS, NFC_POLL_MS);
+
 enum class Mode : uint8_t {
   Waiting,   // jukebox idle, display on, ready to detect a tag
   Sleeping,  // display off (power saving)

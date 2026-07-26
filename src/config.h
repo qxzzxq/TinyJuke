@@ -115,10 +115,29 @@
 #endif
 
 // --- Version ---
-#define VERSION_STRING       "v1.9.3"
+#define VERSION_STRING       "v1.11.0"
+
+// Shown as a QR code on the Version screen. Points at /releases/latest rather
+// than a specific tag, so the code stays correct as new versions ship and the
+// device never has to be online to know what the newest release is.
+// Length is capped by the QR version chosen in screen.cpp — see the
+// static_assert there if this changes.
+#define RELEASE_URL          "https://github.com/qxzzxq/TinyJuke/releases/latest"
 
 // --- Menu ---
 #define MENU_ITEM_COUNT      9
+
+// --- NFC polling / tag-presence policy ---
+// Poll periods and the removal-confirmation windows live in tag_presence.h,
+// which derives each site's miss count from its own cadence.
+
+// --- UI animation ---
+// Motion is only used where it carries information: how far a hold has
+// progressed, where the selection moved, how a value changed.
+#define ANIM_FRAME_MS        16   // ~60 fps gate on animation frames
+#define ANIM_MENU_MS        130   // selector slide between menu rows
+#define ANIM_BAR_MS          90   // volume / brightness bar fill
+#define HOLD_HINT_DELAY_MS  200   // hold progress appears after this much press
 
 // --- Color theme (default index into the THEMES[] table in theme.cpp) ---
 #define THEME_DEFAULT        0   // Bamboo Moss

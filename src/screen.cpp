@@ -7,6 +7,9 @@
 #include "audio.h"
 #include "timer_logic.h"
 #include "web.h"  // getWebPin() for the web server screen
+#include "storage.h"  // sdOpenRead()
+#include "qr_layout.h"
+#include <qrcode.h>
 #include <SD.h>
 #include <esp_heap_caps.h>
 
@@ -126,7 +129,9 @@ void drawUnknownTagScreen(const uint8_t *uid, uint8_t uidLen) {
 // Decode a 24-bit BMP, return heap-allocated RGB565 buffer + dimensions.
 // Caller must free(). Returns nullptr on failure.
 static uint16_t *loadBMP(const char *path, int *outW, int *outH) {
-  File f = SD.open(path);
+  // A tag may name art that was never uploaded or has since been deleted;
+  // the caller falls back to the text-only layout, so keep it off the log.
+  File f = sdOpenRead(path);
   if (!f) return nullptr;
 
   uint8_t h[54];
@@ -252,7 +257,9 @@ void drawNowPlayingScreen(const TagInfo &tag) {
 
     if (artist) {
       char artistBuf[64];
-      if (album) snprintf(artistBuf, sizeof(artistBuf), "%s  \267  %s", artist, album);
+      // Plain ASCII separator: the built-in GFX font is 7-bit, so the Latin-1
+      // middle dot (\267) that used to sit here rendered as a garbage glyph.
+      if (album) snprintf(artistBuf, sizeof(artistBuf), "%s - %s", artist, album);
       else snprintf(artistBuf, sizeof(artistBuf), "%s", artist);
       int artistMaxW = gfx.width() - 2 * marginForSize(1);
       truncateToFit(artistBuf, buf, sizeof(buf), artistMaxW, 1);
@@ -305,10 +312,38 @@ void drawSDErrorScreen() {
 
 static const char *MENU_ITEMS[] = { "Web Management", "Bluetooth Mode", "Volume", "Brightness", "Color Theme", "Power Saving", "Sleep Timer", "Version", "Reboot" };
 
+// 9 items at MENU_ITEM_H=28 fit in 44..(44+9*28)=296, leaving room for the hint bar.
+static const int MENU_START_Y = 44, MENU_ITEM_H = 28;
+
+// Selector bar: a slim accent marker in the left margin, clear of the row
+// highlight (which starts at x=10) and of the label (x=18). Because it never
+// overlaps text, it can be animated between rows with two small fills and no
+// offscreen buffer.
+static const int SEL_X = 4, SEL_W = 4, SEL_H = MENU_ITEM_H - 2;
+
+int menuRowY(int index) { return MENU_START_Y + index * MENU_ITEM_H; }
+
+// Move the selector from prevY to newY (both are row-top coordinates, as
+// returned by menuRowY, or any interpolated value between them). Erases only
+// the strip the bar vacates, so there is no clear-then-draw flicker.
+// prevY < 0 means "not currently drawn".
+void drawMenuSelector(int prevY, int newY) {
+  if (prevY >= 0 && prevY != newY) {
+    int dy = newY - prevY;
+    if (dy >= SEL_H || dy <= -SEL_H) {
+      gfx.fillRect(SEL_X, prevY - 1, SEL_W, SEL_H, C_BG);      // no overlap
+    } else if (dy > 0) {
+      gfx.fillRect(SEL_X, prevY - 1, SEL_W, dy, C_BG);          // vacated at top
+    } else {
+      gfx.fillRect(SEL_X, newY - 1 + SEL_H, SEL_W, -dy, C_BG);  // vacated at bottom
+    }
+  }
+  gfx.fillRect(SEL_X, newY - 1, SEL_W, SEL_H, C_ACCENT);
+}
+
 void drawMenuScreen(int selected) {
   drawHeader("Menu", "");
-  // 9 items at itemH=28 fit in startY=44..(44+9*28)=296, leaving room for the hint bar.
-  const int startY = 44, itemH = 28;
+  const int startY = MENU_START_Y, itemH = MENU_ITEM_H;
 
   for (int i = 0; i < MENU_ITEM_COUNT; i++) {
     int y = startY + i * itemH;
@@ -324,39 +359,76 @@ void drawMenuScreen(int selected) {
       gfx.print(">");
     }
   }
+  drawMenuSelector(-1, menuRowY(selected));
   drawHintBar("hold to return");
+}
+
+// ================================================================
+//  Long-press progress
+// ================================================================
+//
+// A slim accent line along the very bottom edge, growing from the centre
+// outward as the press approaches ENC_HOLD_MS. It sits below the hint-bar
+// text (y=305..312), so it works on every screen without colliding with
+// content — and every screen that accepts a hold has C_BG there, which is
+// what lets clearHoldProgress() erase unconditionally.
+
+static const int HOLD_BAR_Y = 315, HOLD_BAR_H = 4;
+static int s_holdDrawn = -1;
+
+void drawHoldProgress(int pct) {
+  if (pct < 0)   pct = 0;
+  if (pct > 100) pct = 100;
+  if (pct == s_holdDrawn) return;   // nothing new to paint
+
+  // The bar only ever grows during a press, so repainting the current extent
+  // is enough — no erase needed until the press ends.
+  int half = (gfx.width() / 2) * pct / 100;
+  if (half > 0)
+    gfx.fillRect(gfx.width() / 2 - half, HOLD_BAR_Y, half * 2, HOLD_BAR_H, C_ACCENT);
+  s_holdDrawn = pct;
+}
+
+void clearHoldProgress() {
+  if (s_holdDrawn < 0) return;      // never drawn — don't touch the screen
+  gfx.fillRect(0, HOLD_BAR_Y, gfx.width(), HOLD_BAR_H, C_BG);
+  s_holdDrawn = -1;
 }
 
 // ================================================================
 //  Brightness screen
 // ================================================================
 
-static int s_brightnessDrawn = -1;
+static const int BRT_BAR_X = 24, BRT_BAR_Y = 140, BRT_BAR_W = 192, BRT_BAR_H = 20;
+
+static int s_brightnessDrawn    = -1;  // percentage text
+static int s_brightnessBarDrawn = -1;  // bar fill (animated independently)
 
 void drawBrightnessScreen(int level) {
   drawHeader("Brightness", "back");
 
-  const int barX = 24, barY = 140, barW = 192, barH = 20;
-  gfx.fillRect(barX, barY, barW, barH, C_LINE);
-  int fillW = (barW - 4) * level / 100;
+  gfx.fillRect(BRT_BAR_X, BRT_BAR_Y, BRT_BAR_W, BRT_BAR_H, C_LINE);
+  int fillW = (BRT_BAR_W - 4) * level / 100;
   if (fillW > 0)
-    gfx.fillRect(barX + 2, barY + 2, fillW, barH - 4, C_ACCENT);
+    gfx.fillRect(BRT_BAR_X + 2, BRT_BAR_Y + 2, fillW, BRT_BAR_H - 4, C_ACCENT);
 
   char pct[8];
   snprintf(pct, sizeof(pct), "%d%%", level);
   centerText(pct, 180, C_TEXT, 3);
 
   drawHintBar("turn to adjust - click to save");
-  s_brightnessDrawn = level;
+  s_brightnessDrawn = s_brightnessBarDrawn = level;
 }
 
 // ================================================================
 //  Volume screen — two sections: Volume + Max Volume (software cap)
 // ================================================================
 
-static int s_volumeDrawn = -1;
+static int s_volumeDrawn = -1;  // percentage text
 static int s_maxVolDrawn = -1;
 static int s_adjMaxDrawn = -1;
+static int s_volBarDrawn = -1;  // bar fills (animated independently of the text)
+static int s_maxBarDrawn = -1;
 
 // Section geometry (header occupies y=0..34, hint bar at the bottom)
 static const int VOL_BAR_X = 24, VOL_BAR_W = 192, VOL_BAR_H = 16;
@@ -412,8 +484,8 @@ void drawVolumeScreen(int level, int maxLevel, bool adjustingMax) {
 
   drawHintBar("click to switch - hold to save");
 
-  s_volumeDrawn = level;
-  s_maxVolDrawn = maxLevel;
+  s_volumeDrawn = s_volBarDrawn = level;
+  s_maxVolDrawn = s_maxBarDrawn = maxLevel;
   s_adjMaxDrawn = adjustingMax ? 1 : 0;
 }
 
@@ -633,8 +705,10 @@ void clearPlaybackVolumeOverlay() {
 //  Incremental screen updates — only redraw changed items
 // ================================================================
 
+// Swap the row fill / label colors / chevron. The selector bar is NOT touched
+// here — gui.cpp animates it separately so it can glide between the two rows.
 void updateMenuSelection(int oldSel, int newSel) {
-  const int startY = 44, itemH = 28;
+  const int startY = MENU_START_Y, itemH = MENU_ITEM_H;
 
   // Deselect old
   int yo = startY + oldSel * itemH;
@@ -655,7 +729,9 @@ void updateMenuSelection(int oldSel, int newSel) {
   gfx.print(">");
 }
 
-void updateVolumeDisplay(int level, int maxLevel, bool adjustingMax) {
+// Section labels + percentages. Driven by the true values so the numbers never
+// trail the encoder — only the bar fills are animated (updateVolumeBars).
+void updateVolumeText(int level, int maxLevel, bool adjustingMax) {
   int adj = adjustingMax ? 1 : 0;
   if (adj != s_adjMaxDrawn) {
     drawVolumeSectionLabel("Volume", VOL_LABEL_Y, !adjustingMax);
@@ -663,42 +739,54 @@ void updateVolumeDisplay(int level, int maxLevel, bool adjustingMax) {
     s_adjMaxDrawn = adj;
   }
   if (level != s_volumeDrawn) {
-    drawVolumeSectionBar(VOL_BAR_Y, level, s_volumeDrawn, C_ACCENT);
     drawVolumeSectionPct(VOL_PCT_Y, level);
     s_volumeDrawn = level;
   }
   if (maxLevel != s_maxVolDrawn) {
-    drawVolumeSectionBar(MAX_BAR_Y, maxLevel, s_maxVolDrawn, C_TEXT);
     drawVolumeSectionPct(MAX_PCT_Y, maxLevel);
     s_maxVolDrawn = maxLevel;
   }
 }
 
-void updateBrightnessDisplay(int level) {
-  const int barX = 24, barY = 140, barW = 192, barH = 20;
-  int fillW = (barW - 4) * level / 100;
-
-  if (s_brightnessDrawn >= 0) {
-    int prevFillW = (barW - 4) * s_brightnessDrawn / 100;
-    if (fillW < prevFillW) {
-      int clearX = barX + 2 + fillW;
-      int clearW = prevFillW - fillW;
-      gfx.fillRect(clearX, barY + 2, clearW, barH - 4, C_LINE);
-    }
-  } else {
-    gfx.fillRect(barX + 2, barY + 2, barW - 4, barH - 4, C_LINE);
+// Bar fills only — fed interpolated values by gui.cpp's animation tick.
+void updateVolumeBars(int level, int maxLevel) {
+  if (level != s_volBarDrawn) {
+    drawVolumeSectionBar(VOL_BAR_Y, level, s_volBarDrawn, C_ACCENT);
+    s_volBarDrawn = level;
   }
+  if (maxLevel != s_maxBarDrawn) {
+    drawVolumeSectionBar(MAX_BAR_Y, maxLevel, s_maxBarDrawn, C_TEXT);
+    s_maxBarDrawn = maxLevel;
+  }
+}
 
-  if (fillW > 0)
-    gfx.fillRect(barX + 2, barY + 2, fillW, barH - 4, C_ACCENT);
-
+void updateBrightnessText(int level) {
+  if (level == s_brightnessDrawn) return;
   // Erase and redraw percentage (text at y=180, size 3 = 24px tall → 180..203)
   gfx.fillRect(0, 172, gfx.width(), 38, C_BG);
   char pct[8];
   snprintf(pct, sizeof(pct), "%d%%", level);
   centerText(pct, 180, C_TEXT, 3);
-
   s_brightnessDrawn = level;
+}
+
+void updateBrightnessBar(int level) {
+  if (level == s_brightnessBarDrawn) return;
+  int fillW = (BRT_BAR_W - 4) * level / 100;
+
+  if (s_brightnessBarDrawn >= 0) {
+    int prevFillW = (BRT_BAR_W - 4) * s_brightnessBarDrawn / 100;
+    if (fillW < prevFillW)
+      gfx.fillRect(BRT_BAR_X + 2 + fillW, BRT_BAR_Y + 2,
+                   prevFillW - fillW, BRT_BAR_H - 4, C_LINE);
+  } else {
+    gfx.fillRect(BRT_BAR_X + 2, BRT_BAR_Y + 2, BRT_BAR_W - 4, BRT_BAR_H - 4, C_LINE);
+  }
+
+  if (fillW > 0)
+    gfx.fillRect(BRT_BAR_X + 2, BRT_BAR_Y + 2, fillW, BRT_BAR_H - 4, C_ACCENT);
+
+  s_brightnessBarDrawn = level;
 }
 
 // ================================================================
@@ -783,14 +871,69 @@ void updateSleepTimerDisplay(int minutes) {
 //  Version screen
 // ================================================================
 
+// QR version 4 = 33x33 modules, holding 62 bytes here — comfortably more than
+// the releases URL. 33 modules is also about the largest symbol that still
+// leaves usefully chunky pixels on a 240 px-wide screen.
+//
+// Two quirks of ricmoo/QRCode worth knowing before touching any of this:
+//
+//  - Its ECC_* constants do not line up with its own table order. ECC_LOW is 0,
+//    which indexes the row holding the *Medium* codeword counts, so we get
+//    Medium correction and Medium's 62-byte capacity. That is fine — stronger
+//    correction than we asked for — but it is why the number is 62 rather than
+//    the 78 a version-4 / ECC-L table would lead you to expect.
+//  - qrcode_initBytes() never checks the data length against that capacity
+//    before writing. Over-long input silently overruns the buffer instead of
+//    returning an error, so the static_assert below is the only thing standing
+//    between a longer URL and memory corruption. Do not weaken it, and do not
+//    rely on the initText() return value to catch an oversized string.
+static const uint8_t QR_VERSION  = 4;
+static const int     QR_MODULES  = 4 * QR_VERSION + 17;   // 33
+static const size_t  QR_CAPACITY = 62;
+
+// Fixed black-on-white, never themed — see the polarity note on drawQrCode().
+static const uint16_t QR_LIGHT = 0xFFFF;
+static const uint16_t QR_DARK  = 0x0000;
+
+static_assert(sizeof(RELEASE_URL) - 1 <= QR_CAPACITY,
+              "RELEASE_URL exceeds the QR capacity and would overflow the "
+              "encoder buffer at runtime — raise QR_VERSION, re-derive "
+              "QR_CAPACITY, and re-check the symbol still fits the screen");
+
+// Render a QR for `text` into the given box.
+//
+// Deliberately drawn as black modules on a white patch rather than in theme
+// colours: the format assumes dark-on-light, and enough scanners refuse an
+// inverted symbol that theming this would leave it looking correct but
+// unusable. Same reason the quiet zone is part of the white patch.
+static void drawQrCode(const char *text, int boxX, int boxY, int boxW, int boxH) {
+  QrPlacement p = qrPlace(QR_MODULES, boxX, boxY, boxW, boxH);
+  if (p.scale < 1) return;   // nothing sensible to draw in this space
+
+  QRCode qr;
+  uint8_t qrData[qrcode_getBufferSize(QR_VERSION)];
+  if (qrcode_initText(&qr, qrData, QR_VERSION, ECC_LOW, text) != 0) return;
+
+  gfx.fillRect(p.x, p.y, p.size, p.size, QR_LIGHT);
+
+  // Draw each row as horizontal runs of dark modules instead of one fillRect
+  // per module: a 33x33 symbol is ~1089 rects otherwise, and every one pays
+  // its own SPI transaction setup.
+  for (uint8_t my = 0; my < qr.size; my++) {
+    uint8_t mx = 0;
+    while (mx < qr.size) {
+      if (!qrcode_getModule(&qr, mx, my)) { mx++; continue; }
+      uint8_t run = 0;
+      while (mx + run < qr.size && qrcode_getModule(&qr, mx + run, my)) run++;
+      gfx.fillRect(p.originX + mx * p.scale, p.originY + my * p.scale,
+                   run * p.scale, p.scale, QR_DARK);
+      mx += run;
+    }
+  }
+}
+
 void drawVersionScreen() {
   drawHeader("Version", "back");
-
-  gfx.setTextColor(C_TEXT);
-  gfx.setTextSize(3);
-  int16_t w = textWidth(VERSION_STRING);
-  gfx.setCursor((gfx.width() - w) / 2, 100);
-  gfx.print(VERSION_STRING);
 
   const char *mode =
 #ifdef DEV_MODE
@@ -799,11 +942,12 @@ void drawVersionScreen() {
       "release";
 #endif
 
-  gfx.setTextColor(C_ACCENT);
-  gfx.setTextSize(3);
-  w = textWidth(mode);
-  gfx.setCursor((gfx.width() - w) / 2, 140);
-  gfx.print(mode);
+  centerText(VERSION_STRING, 44, C_TEXT, 3);
+  centerText(mode, 74, C_ACCENT, 2);
+
+  // Free band between the mode line and the caption.
+  drawQrCode(RELEASE_URL, 0, 96, gfx.width(), 168);
+  centerText("scan for latest release", 272, C_MUTED, 1);
 
   drawHintBar("click or hold to return");
 }

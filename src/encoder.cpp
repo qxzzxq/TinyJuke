@@ -36,9 +36,12 @@ static void IRAM_ATTR encISR() {
 //
 // State machine waits for release to decide click vs hold:
 //   IDLE → MAYBE → ARMED → release → ENC_CLICK
-//                       → 600ms   → ENC_HOLD → release → IDLE (silent)
+//                       → ENC_HOLD_MS → ENC_HOLD → release → IDLE (silent)
 enum { IDLE, MAYBE, ARMED, HOLD } static btnState = IDLE;
 static uint32_t btnTimer = 0;
+// Button event produced on a call where rotation took priority. Without this
+// latch, turning the shaft while pressed would discard the click or hold.
+static int      pendingBtn = ENC_NONE;
 
 void initEncoder() {
   pinMode(ENC_CLK, INPUT);
@@ -71,16 +74,10 @@ void initEncoder() {
   }
 }
 
-int readEncoder() {
-  // --- Rotation: return full accumulated delta ---
-  noInterrupts();
-  int d = encDelta;
-  encDelta = 0;
-  interrupts();
-
-  if (d != 0) return d;  // ±N steps (CW positive, CCW negative)
-
-  // --- Button (debounced state machine) ---
+// Advance the button state machine one step. Split out of readEncoder() so it
+// runs on every poll even when rotation takes priority — otherwise turning the
+// shaft while pressed would freeze hold detection.
+static int pollButton() {
   bool raw = (digitalRead(ENC_SW) == LOW);
   uint32_t now = millis();
 
@@ -96,7 +93,7 @@ int readEncoder() {
     break;
   case ARMED:
     if (!raw) { btnState = IDLE; return ENC_CLICK; } // short press → click
-    if (now - btnTimer > 600) {                       // long press → hold
+    if (now - btnTimer > ENC_HOLD_MS) {              // long press → hold
       btnState = HOLD;
       return ENC_HOLD;
     }
@@ -106,6 +103,40 @@ int readEncoder() {
     break;
   }
   return ENC_NONE;
+}
+
+uint32_t encHoldMs() {
+  if (btnState == ARMED) {
+    uint32_t held = millis() - btnTimer;
+    return (held > ENC_HOLD_MS) ? ENC_HOLD_MS : held;
+  }
+  // Once ENC_HOLD has fired there is no progress left to report — the gesture
+  // is complete, so callers stop drawing rather than showing a full bar.
+  return 0;
+}
+
+bool encPressActive() {
+  return btnState == MAYBE || btnState == ARMED;
+}
+
+int readEncoder() {
+  // Tick the button machine first so hold progress keeps advancing even on
+  // calls that return rotation; stash any event it produced.
+  int btn = pollButton();
+  if (btn != ENC_NONE) pendingBtn = btn;
+
+  // --- Rotation: return full accumulated delta ---
+  noInterrupts();
+  int d = encDelta;
+  encDelta = 0;
+  interrupts();
+
+  if (d != 0) return d;  // ±N steps (CW positive, CCW negative)
+
+  // --- Button (debounced state machine) ---
+  int e = pendingBtn;
+  pendingBtn = ENC_NONE;
+  return e;
 }
 
 void saveVolume() {

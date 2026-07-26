@@ -39,10 +39,22 @@ void clearPlaybackVolumeOverlay();
 void drawSleepTimerCountdown(unsigned long remainingMs);
 void updateSleepTimerCountdown(unsigned long remainingMs);
 
+// Menu geometry + animated selector bar (gui.cpp drives the interpolation)
+int  menuRowY(int index);                    // top y of menu row `index`
+void drawMenuSelector(int prevY, int newY);  // prevY < 0 = not currently drawn
+
+// Long-press progress along the bottom edge; pct 0..100
+void drawHoldProgress(int pct);
+void clearHoldProgress();
+
 // Incremental updates — only redraw changed items (no flicker)
 void updateMenuSelection(int oldSel, int newSel);
-void updateVolumeDisplay(int level, int maxLevel, bool adjustingMax);
-void updateBrightnessDisplay(int level);
+// Text (true values, instant) and bar fills (interpolated) update separately
+// so an animated fill never makes the percentage lag behind the encoder.
+void updateVolumeText(int level, int maxLevel, bool adjustingMax);
+void updateVolumeBars(int level, int maxLevel);
+void updateBrightnessText(int level);
+void updateBrightnessBar(int level);
 void updatePowerSaveDisplay(int minutes);
 void updateSleepTimerDisplay(int minutes);
 void updateWebConnectionCount(int connections);

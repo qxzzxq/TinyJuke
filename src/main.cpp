@@ -20,6 +20,7 @@
 #include "storage.h"
 #include "timer_logic.h"
 #include "jukebox_state.h"
+#include "anim.h"
 
 #include <PN532_HSU.h>
 #include <PN532.h>
@@ -70,7 +71,9 @@ static void initSDAndLoadTags() {
   SD.mkdir("/music");
   SD.mkdir("/img");
 
-  File f = SD.open("/tags.json", FILE_READ);
+  // A card with no tags yet is a normal state, not an error — sdOpenRead()
+  // keeps the VFS "does not exist" log line out of the boot output.
+  File f = sdOpenRead("/tags.json");
   if (!f) {
     Serial.println("tags.json not found.");
     return;
@@ -145,6 +148,12 @@ uint32_t activityIdleMs() {
   return millis() - s_state.lastActivityMs;
 }
 
+// Missed reads that confirm removal at the between-repeats poll cadence.
+static const uint8_t REPLAY_ABSENT_CONFIRM =
+    tagAbsentMisses(TAG_ABSENT_PLAYING_MS, NFC_REPLAY_POLL_MS);
+// The unknown-tag screen polls with a 200 ms timeout plus a 30 ms pause.
+static const uint8_t UNKNOWN_ABSENT_CONFIRM = tagAbsentMisses(TAG_ABSENT_IDLE_MS, 230);
+
 // Map raw encoder event integer to FSM-normalized EncEvent.
 static EncEvent normalizeEnc(int ev) {
   if (ev == ENC_NONE)  return EncEvent::None;
@@ -168,16 +177,32 @@ static void runPlayback(const uint8_t *uid, uint8_t uidLength) {
     drawUnknownTagScreen(uid, uidLength);
     char shownUid[32]; uidToStr(uid, uidLength, shownUid);
     uint32_t t = millis();
+    uint8_t  absent = 0;
     while (millis() - t < 10000) {
       int eu = readEncoder();
       if (eu == ENC_CLICK || eu == ENC_HOLD) break;
+
+      // This screen's hint is "hold to dismiss", so the gesture needs the same
+      // progress indicator as everywhere else. Skip the blocking NFC read for
+      // the duration of a press so the loop runs fast enough to animate it —
+      // safe here because the 10 s timeout still bounds the screen, and the
+      // user is pressing to dismiss rather than swapping tags.
+      int hp = holdProgressPct(encHoldMs(), HOLD_HINT_DELAY_MS, ENC_HOLD_MS);
+      if (hp >= 0) drawHoldProgress(hp);
+      else         clearHoldProgress();
+      if (encPressActive()) continue;
+
       uint8_t u[10]; uint8_t uLen = 0;
       if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 200)) {
+        // Same debounce as everywhere else: one missed read while the tag
+        // settles must not dismiss the screen.
+        if (++absent < UNKNOWN_ABSENT_CONFIRM) { delay(30); continue; }
         s_state.tagPresent = false;
         Serial.println("Tag removed.");
         drawWaitingScreen();
         return;
       }
+      absent = 0;
       if (uLen <= 10) {
         char currentUid[32]; uidToStr(u, uLen, currentUid);
         if (strcmp(currentUid, shownUid) != 0) {
@@ -187,6 +212,24 @@ static void runPlayback(const uint8_t *uid, uint8_t uidLength) {
       }
       delay(30);
     }
+
+    // Dismissed by click, hold or timeout. tagPresent is still true for the
+    // tag we were showing, and the FSM only tracks *presence* — so if the tag
+    // was swapped while dismissing (the animation skip above suppresses reads
+    // for the whole press), the replacement reads as "same tag still there"
+    // and never triggers playback until it is physically removed. One last
+    // read settles which it is.
+    {
+      uint8_t u[10]; uint8_t uLen = 0;
+      if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 200)) {
+        s_state.tagPresent = false;              // gone while we were dismissing
+      } else if (uLen <= 10) {
+        char currentUid[32]; uidToStr(u, uLen, currentUid);
+        if (strcmp(currentUid, shownUid) != 0)
+          s_state.tagPresent = false;            // swapped — let it re-trigger
+      }
+    }
+    clearHoldProgress();
     drawWaitingScreen();
     return;
   }
@@ -212,9 +255,17 @@ static void runPlayback(const uint8_t *uid, uint8_t uidLength) {
       break;
     }
 
-    // Quick NFC check: detect tag removal or tag swap before replay
+    // NFC check between repeats: detect tag removal or tag swap.
+    // Debounced — a tag that is still settling in the field can miss a read
+    // right after playback stops, and treating that as a removal makes the
+    // track stop and immediately restart.
     uint8_t u[10]; uint8_t uLen = 0;
-    if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 50)) {
+    bool seen = false;
+    for (uint8_t miss = 0; miss < REPLAY_ABSENT_CONFIRM; miss++) {
+      seen = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, NFC_REPLAY_POLL_MS);
+      if (seen) break;
+    }
+    if (!seen) {
       Serial.println("Tag removed.");
       localPresent = false;
       s_state.tagPresent = false;
@@ -319,11 +370,45 @@ void loop() {
   if (sleepTimerFired) sleepTimerFired = false;  // consume edge
   in.powerSaveMinutes  = powerSaveMinutes;
 
+  // "Hold for menu" is the one gesture on this screen, so show its progress.
+  // Drawn right after readEncoder() so the button state is fresh; every screen
+  // this path can be showing paints C_BG in the indicator's band.
+  //
+  // Gated on the mode alone, NOT on tagPresent: after the sleep timer stops
+  // playback the tag is still on the reader, yet the waiting screen is up and
+  // HOLD still opens the menu, so the gesture needs feedback there too.
+  uint32_t heldMs = encHoldMs();
+  bool     waiting = (s_state.mode == Mode::Waiting);
+  if (waiting) {
+    int pct = holdProgressPct(heldMs, HOLD_HINT_DELAY_MS, ENC_HOLD_MS);
+    if (pct >= 0) drawHoldProgress(pct);
+    else          clearHoldProgress();
+  }
+
   // Don't waste an NFC poll while sleeping with a tag still on the reader.
   uint8_t uid[10] = {0};
   uint8_t uidLength = 0;
-  if (!(s_state.mode == Mode::Sleeping && s_state.sleepStopped)) {
-    uint16_t timeout = (s_state.mode == Mode::Sleeping) ? 100 : 300;
+  // Skip the blocking poll entirely for the whole press on the idle waiting
+  // screen: that frees the loop to run at full rate, so the hold indicator
+  // animates smoothly instead of stepping once per poll, and the hold
+  // threshold stops depending on where the press lands in the poll cycle.
+  //
+  // This keeps the stricter !tagPresent condition that drawing the indicator
+  // does not need: skipping is only safe with no tag present, because then
+  // the removal debounce isn't armed and a skipped poll can't be misread as
+  // a tag disappearing.
+  bool holdingIdle = waiting && !s_state.tagPresent && encPressActive();
+
+  // The poll that produces ENC_HOLD moves the button to its HOLD state, so
+  // encPressActive() is already false by here and the skip above no longer
+  // applies. Skip explicitly on that event too: jukeboxStep() returns on Hold
+  // without ever reading nfcFound, so polling first is a blocking NFC_POLL_MS
+  // of dead time between the indicator completing and the menu appearing.
+  bool holdFired = (in.encoderEvent == EncEvent::Hold);
+
+  if (!holdFired && !holdingIdle &&
+      !(s_state.mode == Mode::Sleeping && s_state.sleepStopped)) {
+    uint16_t timeout = (s_state.mode == Mode::Sleeping) ? 100 : NFC_POLL_MS;
     in.nfcFound = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, timeout);
     if (uidLength > 10) uidLength = 10;
   }

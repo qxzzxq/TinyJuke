@@ -21,6 +21,9 @@
 #include "volume_logic.h"
 #include "jukebox_state.cpp"
 #include "theme.h"
+#include "anim.h"
+#include "qr_layout.h"
+#include <qrcode.h>
 
 // ----------------------------------------------------------------
 //  uidToStr — colon-separated uppercase hex
@@ -711,39 +714,53 @@ void test_fsm_arrival_suppressed_when_sleep_stopped() {
 
 // --- Tag removal debounce ----------------------------------------
 
-void test_fsm_tag_removal_requires_three_misses() {
+void test_fsm_tag_removal_requires_full_miss_run() {
   JukeboxState s = jukeboxInitialState(0);
   s.tagPresent = true;
   s.lastActivityMs = 0;
 
-  for (int miss = 1; miss <= 2; miss++) {
+  for (int miss = 1; miss < TAG_ABSENT_CONFIRM; miss++) {
     TickResult r = jukeboxStep(s, baseInput(miss * 100));
     s = r.state;
     TEST_ASSERT_FALSE(hasAction(r.actions, Action::ConfirmTagRemoved));
     TEST_ASSERT_TRUE(s.tagPresent);
     TEST_ASSERT_EQUAL_UINT8(miss, s.tagAbsentCount);
   }
-  // Third consecutive miss confirms removal.
-  TickResult r3 = jukeboxStep(s, baseInput(300));
-  TEST_ASSERT_TRUE(hasAction(r3.actions, Action::ConfirmTagRemoved));
-  TEST_ASSERT_FALSE(r3.state.tagPresent);
-  TEST_ASSERT_FALSE(r3.state.sleepStopped);
-  TEST_ASSERT_EQUAL_UINT8(0, r3.state.tagAbsentCount);
+  // The final consecutive miss confirms removal.
+  TickResult rN = jukeboxStep(s, baseInput(TAG_ABSENT_CONFIRM * 100));
+  TEST_ASSERT_TRUE(hasAction(rN.actions, Action::ConfirmTagRemoved));
+  TEST_ASSERT_FALSE(rN.state.tagPresent);
+  TEST_ASSERT_FALSE(rN.state.sleepStopped);
+  TEST_ASSERT_EQUAL_UINT8(0, rN.state.tagAbsentCount);
+}
+
+void test_fsm_removal_tolerance_covers_a_read_glitch() {
+  // The miss count exists to ride out PN532 read glitches, and it is sized
+  // against the ~100 ms waiting-screen poll period (NFC_POLL_MS). If those two
+  // drift apart, a tag that flickers for a moment would stop playback.
+  TEST_ASSERT_TRUE(TAG_ABSENT_CONFIRM * 100 >= 800);
 }
 
 void test_fsm_intermittent_glitch_does_not_remove_tag() {
-  // miss, miss, found, miss, miss — only resets to 1 after the found, never reaches 3.
+  // A found read anywhere in the run resets the counter, so an intermittent
+  // tag never accumulates enough consecutive misses to be called removed.
   JukeboxState s = jukeboxInitialState(0);
   s.tagPresent = true;
-  TickResult r;
-  r = jukeboxStep(s, baseInput(10));                                s = r.state;
-  r = jukeboxStep(s, baseInput(20));                                s = r.state;
-  TickInput inFound = baseInput(30); inFound.nfcFound = true;
-  r = jukeboxStep(s, inFound);                                      s = r.state;
-  TEST_ASSERT_EQUAL_UINT8(0, s.tagAbsentCount);
-  r = jukeboxStep(s, baseInput(40));                                s = r.state;
-  r = jukeboxStep(s, baseInput(50));                                s = r.state;
-  TEST_ASSERT_FALSE(hasAction(r.actions, Action::ConfirmTagRemoved));
+  TickResult r = {};
+  uint32_t t = 10;
+
+  for (int round = 0; round < 3; round++) {
+    for (int miss = 0; miss < TAG_ABSENT_CONFIRM - 1; miss++, t += 10) {
+      r = jukeboxStep(s, baseInput(t));
+      s = r.state;
+      TEST_ASSERT_FALSE(hasAction(r.actions, Action::ConfirmTagRemoved));
+    }
+    TickInput inFound = baseInput(t); t += 10;
+    inFound.nfcFound = true;
+    r = jukeboxStep(s, inFound);
+    s = r.state;
+    TEST_ASSERT_EQUAL_UINT8(0, s.tagAbsentCount);
+  }
   TEST_ASSERT_TRUE(s.tagPresent);
 }
 
@@ -753,7 +770,7 @@ void test_fsm_removal_clears_sleep_stopped() {
   JukeboxState s = jukeboxInitialState(0);
   s.tagPresent = true;
   s.sleepStopped = true;
-  s.tagAbsentCount = 2;
+  s.tagAbsentCount = TAG_ABSENT_CONFIRM - 1;   // one miss short of confirmed
   TickResult r = jukeboxStep(s, baseInput(500));
   TEST_ASSERT_TRUE(hasAction(r.actions, Action::ConfirmTagRemoved));
   TEST_ASSERT_FALSE(r.state.sleepStopped);
@@ -916,6 +933,27 @@ void test_fsm_hold_enters_menu_from_waiting() {
   TEST_ASSERT_EQUAL(Mode::Waiting, (int)r.state.mode);
 }
 
+void test_fsm_hold_outcome_ignores_nfc_state() {
+  // main.cpp skips the blocking NFC read on the tick a hold fires, so the menu
+  // opens immediately instead of after a dead poll. That is only safe because
+  // the Hold path returns before consulting nfcFound — pin it here so the
+  // skip can't be silently invalidated by a future change to the FSM.
+  for (int found = 0; found < 2; found++) {
+    JukeboxState s = jukeboxInitialState(0);
+    TickInput in = baseInput(1000);
+    in.encoderEvent = EncEvent::Hold;
+    in.nfcFound = (found != 0);
+
+    TickResult r = jukeboxStep(s, in);
+    TEST_ASSERT_TRUE(hasAction(r.actions, Action::EnterMenu));
+    TEST_ASSERT_EQUAL_UINT8(1, r.actions.count);  // nothing else emitted
+    // A tag arrival would otherwise have been registered here; it must not be,
+    // or a skipped poll would change the outcome.
+    TEST_ASSERT_FALSE(r.state.tagPresent);
+    TEST_ASSERT_FALSE(hasAction(r.actions, Action::TriggerPlayback));
+  }
+}
+
 void test_fsm_encoder_rotation_resets_idle_clock() {
   // Even without other actions, rotation should reset lastActivityMs so the
   // idle counter restarts.
@@ -977,8 +1015,8 @@ void test_fsm_full_sleep_timer_recovery_scenario() {
   TEST_ASSERT_EQUAL(Mode::Waiting, (int)s.mode);
   TEST_ASSERT_TRUE(s.sleepStopped);  // still suppressed until removal
 
-  // 8) Tag removed for 3 consecutive misses.
-  for (int i = 0; i < 3; i++) {
+  // 8) Tag removed for a full run of consecutive misses.
+  for (int i = 0; i < TAG_ABSENT_CONFIRM; i++) {
     TickInput f = baseInput(2000 + 5UL * 60000UL + 3000 + (uint32_t)(i * 100));
     r = jukeboxStep(s, f); s = r.state;
   }
@@ -1006,6 +1044,436 @@ void test_rgb565_primaries_and_extremes() {
 void test_rgb565_truncates_low_bits() {
   // Channels are truncated (not rounded): R keeps 5 MSB, G 6 MSB, B 5 MSB.
   TEST_ASSERT_EQUAL_HEX16(0x8E2D, rgb565hex(0x8FC46B));  // Bamboo Moss accent
+}
+
+// ----------------------------------------------------------------
+//  Animation helpers — fixed-point progress, easing, interpolation
+// ----------------------------------------------------------------
+
+void test_anim_progress_spans_zero_to_full() {
+  TEST_ASSERT_EQUAL_INT32(0,          animProgress(0, 100));
+  TEST_ASSERT_EQUAL_INT32(500,        animProgress(50, 100));
+  TEST_ASSERT_EQUAL_INT32(ANIM_SCALE, animProgress(100, 100));
+}
+
+void test_anim_progress_clamps_past_duration() {
+  // A frame that lands late must not overshoot — callers use the result
+  // directly as an interpolation factor.
+  TEST_ASSERT_EQUAL_INT32(ANIM_SCALE, animProgress(150, 100));
+  TEST_ASSERT_EQUAL_INT32(ANIM_SCALE, animProgress(0xFFFFFFFFUL, 100));
+}
+
+void test_anim_progress_zero_duration_is_complete() {
+  // Zero duration means "no animation" — settle immediately rather than
+  // dividing by zero.
+  TEST_ASSERT_EQUAL_INT32(ANIM_SCALE, animProgress(0, 0));
+}
+
+void test_ease_out_cubic_endpoints_are_exact() {
+  // Endpoints must be exact or the animation visibly snaps at the end.
+  TEST_ASSERT_EQUAL_INT32(0,          easeOutCubic(0));
+  TEST_ASSERT_EQUAL_INT32(ANIM_SCALE, easeOutCubic(ANIM_SCALE));
+  TEST_ASSERT_EQUAL_INT32(0,          easeOutCubic(-50));
+  TEST_ASSERT_EQUAL_INT32(ANIM_SCALE, easeOutCubic(ANIM_SCALE + 50));
+}
+
+void test_ease_out_cubic_front_loads_the_motion() {
+  // 1-(1-t)^3: at the halfway point most of the distance is already covered.
+  // That front-loading is what makes the motion read as "snappy".
+  TEST_ASSERT_EQUAL_INT32(875, easeOutCubic(500));
+  TEST_ASSERT_EQUAL_INT32(271, easeOutCubic(100));
+  TEST_ASSERT_TRUE(easeOutCubic(500) > 500);
+}
+
+void test_ease_out_cubic_is_monotonic() {
+  // A non-monotonic curve would make the highlight jitter backwards.
+  int32_t prev = -1;
+  for (int32_t q = 0; q <= ANIM_SCALE; q += 10) {
+    int32_t v = easeOutCubic(q);
+    TEST_ASSERT_TRUE(v >= prev);
+    prev = v;
+  }
+}
+
+void test_anim_lerp_endpoints_and_midpoint() {
+  TEST_ASSERT_EQUAL_INT32(0,   animLerp(0, 100, 0));
+  TEST_ASSERT_EQUAL_INT32(100, animLerp(0, 100, ANIM_SCALE));
+  TEST_ASSERT_EQUAL_INT32(50,  animLerp(0, 100, 500));
+  // Menu rows: item 0 (y=44) to item 8 (y=268).
+  TEST_ASSERT_EQUAL_INT32(156, animLerp(44, 268, 500));
+}
+
+void test_anim_lerp_handles_descending_range() {
+  // Scrolling up means to < from; the delta must stay signed.
+  TEST_ASSERT_EQUAL_INT32(50,  animLerp(100, 0, 500));
+  TEST_ASSERT_EQUAL_INT32(156, animLerp(268, 44, 500));
+  TEST_ASSERT_EQUAL_INT32(-25, animLerp(-50, 0, 500));
+}
+
+void test_anim_value_interpolates_then_settles() {
+  AnimI32 a;
+  animStart(a, 44, 268, 1000, 130);   // menu row 0 -> row 8 over 130 ms
+  TEST_ASSERT_EQUAL_INT32(44,  animValue(a, 1000));
+  TEST_ASSERT_EQUAL_INT32(240, animValue(a, 1065));   // eased, not linear (156)
+  TEST_ASSERT_EQUAL_INT32(268, animValue(a, 1130));
+  TEST_ASSERT_EQUAL_INT32(268, animValue(a, 5000));   // stays put afterwards
+}
+
+void test_anim_done_reports_completion() {
+  AnimI32 a;
+  animStart(a, 0, 100, 1000, 130);
+  TEST_ASSERT_FALSE(animDone(a, 1000));
+  TEST_ASSERT_FALSE(animDone(a, 1129));
+  TEST_ASSERT_TRUE(animDone(a, 1130));
+  TEST_ASSERT_TRUE(animDone(a, 9999));
+}
+
+void test_anim_retarget_mid_flight_starts_from_current_value() {
+  // A fast encoder spin retargets while the previous move is still running.
+  // Restarting from the *current* value is what keeps the motion continuous —
+  // restarting from the old row endpoint would visibly jump backwards.
+  AnimI32 a;
+  animStart(a, 44, 72, 1000, 130);
+  int32_t mid = animValue(a, 1065);
+  TEST_ASSERT_EQUAL_INT32(68, mid);           // 44 + 28*0.875
+
+  animStart(a, mid, 100, 1065, 130);
+  TEST_ASSERT_EQUAL_INT32(68,  animValue(a, 1065));   // no discontinuity
+  TEST_ASSERT_EQUAL_INT32(100, animValue(a, 1195));
+}
+
+void test_anim_survives_millis_wrap() {
+  // Elapsed time uses unsigned subtraction, so an animation started just
+  // before the 49-day millis() rollover keeps running across it.
+  const uint32_t nearMax = 0xFFFFFFFFUL - 49;   // 50 ms before wrap
+  AnimI32 a;
+  animStart(a, 0, 200, nearMax, 200);
+  TEST_ASSERT_EQUAL_INT32(0, animValue(a, nearMax));
+  // 50 ms later the counter has wrapped to 50 → 100 ms elapsed → q=500.
+  TEST_ASSERT_EQUAL_INT32(175, animValue(a, 50));    // 200 * 0.875
+  TEST_ASSERT_FALSE(animDone(a, 50));
+  TEST_ASSERT_TRUE(animDone(a, 150));
+}
+
+void test_anim_settle_is_an_idle_animation() {
+  AnimI32 a;
+  animSettle(a, 156, 5000);
+  TEST_ASSERT_EQUAL_INT32(156, animValue(a, 5000));
+  TEST_ASSERT_EQUAL_INT32(156, animValue(a, 6000));
+  TEST_ASSERT_TRUE(animDone(a, 5000));
+}
+
+// ----------------------------------------------------------------
+//  Tag-presence policy — miss counts derived from poll cadence
+// ----------------------------------------------------------------
+
+void test_tag_absent_misses_never_accepts_a_single_miss() {
+  // The whole point of this helper. A tag placed quickly skims the edge of
+  // the reader's field and can miss a read while it settles; if one miss
+  // could confirm removal, playback would stop and instantly restart.
+  TEST_ASSERT_GREATER_OR_EQUAL_UINT8(2, tagAbsentMisses(450, 150));
+  TEST_ASSERT_GREATER_OR_EQUAL_UINT8(2, tagAbsentMisses(900, 100));
+  // Even when the poll period alone already exceeds the window.
+  TEST_ASSERT_EQUAL_UINT8(2, tagAbsentMisses(50, 500));
+  TEST_ASSERT_EQUAL_UINT8(2, tagAbsentMisses(0, 100));
+}
+
+void test_tag_absent_misses_covers_the_confirm_window() {
+  // count * period must reach the requested duration, or a tag would be
+  // called removed sooner than the policy says.
+  const uint32_t cases[][2] = {
+    {900, 100}, {450, 150}, {450, 50}, {900, 230}, {600, 70},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    uint32_t confirmMs = cases[i][0], period = cases[i][1];
+    uint32_t covered = (uint32_t)tagAbsentMisses(confirmMs, period) * period;
+    TEST_ASSERT_TRUE(covered >= confirmMs);
+  }
+}
+
+void test_tag_absent_misses_rounds_up_not_down() {
+  // Truncating would under-cover the window by up to one whole poll period.
+  TEST_ASSERT_EQUAL_UINT8(9, tagAbsentMisses(900, 100));   // exact
+  TEST_ASSERT_EQUAL_UINT8(3, tagAbsentMisses(450, 150));   // exact
+  TEST_ASSERT_EQUAL_UINT8(5, tagAbsentMisses(900, 200));   // 4.5 -> 5
+  TEST_ASSERT_EQUAL_UINT8(4, tagAbsentMisses(900, 230));   // 3.9 -> 4
+}
+
+void test_tag_absent_misses_saturates_at_uint8() {
+  TEST_ASSERT_EQUAL_UINT8(255, tagAbsentMisses(1000000, 1));
+}
+
+void test_tag_presence_periods_stay_within_their_windows() {
+  // The FSM stores tagAbsentCount as a uint8_t, so every configured pairing
+  // must fit — this is what stops a future cadence change from silently
+  // wrapping the counter and never confirming a removal.
+  TEST_ASSERT_TRUE(tagAbsentMisses(TAG_ABSENT_IDLE_MS,    NFC_POLL_MS)          < 255);
+  TEST_ASSERT_TRUE(tagAbsentMisses(TAG_ABSENT_PLAYING_MS, NFC_PLAYBACK_POLL_MS) < 255);
+  TEST_ASSERT_TRUE(tagAbsentMisses(TAG_ABSENT_PLAYING_MS, NFC_REPLAY_POLL_MS)   < 255);
+
+  // Pin what the shipped configuration actually resolves to. The idle and
+  // playback counts match the values these sites used before the policy was
+  // consolidated, so this change is behaviour-preserving there; the replay
+  // re-poll was previously a single read, which is the bug being fixed.
+  TEST_ASSERT_EQUAL_UINT8(9, tagAbsentMisses(TAG_ABSENT_IDLE_MS,    NFC_POLL_MS));
+  TEST_ASSERT_EQUAL_UINT8(3, tagAbsentMisses(TAG_ABSENT_PLAYING_MS, NFC_PLAYBACK_POLL_MS));
+  TEST_ASSERT_EQUAL_UINT8(9, tagAbsentMisses(TAG_ABSENT_PLAYING_MS, NFC_REPLAY_POLL_MS));
+  // Removal while audio is playing should be confirmed sooner than while
+  // idle — the sound keeps going until we accept it.
+  TEST_ASSERT_TRUE(TAG_ABSENT_PLAYING_MS < TAG_ABSENT_IDLE_MS);
+}
+
+void test_playback_ignores_misses_while_the_tag_is_landing() {
+  // Observed on hardware: one detection, then playWav() stopping on its own
+  // miss run and the track restarting from zero before the tag came to rest.
+  uint8_t misses = 0; bool confirmed = false;
+  for (uint32_t t = 0; t < TAG_SETTLE_MS; t += NFC_PLAYBACK_POLL_MS)
+    TEST_ASSERT_FALSE(tagMissTick(misses, confirmed, false, t));
+  TEST_ASSERT_FALSE(confirmed);
+}
+
+void test_early_misses_are_discarded_not_banked() {
+  // The regression that made the first attempt at this only *reduce* the
+  // restart rate: misses accumulated during the landing window, so the
+  // counter was already at the threshold when the window closed and the very
+  // next miss stopped playback. After a long unreadable run the tag must
+  // still get a full fresh debounce.
+  const uint8_t need = tagAbsentMisses(TAG_ABSENT_PLAYING_MS, NFC_PLAYBACK_POLL_MS);
+  uint8_t misses = 0; bool confirmed = false;
+
+  for (uint32_t t = 0; t < TAG_SETTLE_MS; t += 10)
+    tagMissTick(misses, confirmed, false, t);      // long unreadable run
+  TEST_ASSERT_EQUAL_UINT8(0, misses);              // banked nothing
+
+  tagMissTick(misses, confirmed, true, TAG_SETTLE_MS);  // tag lands
+  for (uint8_t i = 1; i < need; i++)
+    TEST_ASSERT_FALSE(tagMissTick(misses, confirmed, false, TAG_SETTLE_MS + i));
+  TEST_ASSERT_TRUE(tagMissTick(misses, confirmed, false, TAG_SETTLE_MS + need));
+}
+
+void test_playback_debounces_normally_once_the_tag_is_seen() {
+  // After the first successful read, removal must be responsive again — the
+  // landing grace does not linger for the rest of the track.
+  const uint8_t need = tagAbsentMisses(TAG_ABSENT_PLAYING_MS, NFC_PLAYBACK_POLL_MS);
+  uint8_t misses = 0; bool confirmed = false;
+
+  tagMissTick(misses, confirmed, true, 10);        // seen almost immediately
+  TEST_ASSERT_TRUE(confirmed);
+  for (uint8_t i = 1; i < need; i++)
+    TEST_ASSERT_FALSE(tagMissTick(misses, confirmed, false, 10 + i));
+  TEST_ASSERT_TRUE(tagMissTick(misses, confirmed, false, 10 + need));
+}
+
+void test_playback_stops_for_a_tag_that_never_lands() {
+  // A tag waved past the reader is detected once but never read again. The
+  // TAG_SETTLE_MS backstop has to stop playback rather than wait forever.
+  uint8_t misses = 0; bool confirmed = false;
+  bool stopped = false;
+  for (uint32_t t = 0; t < TAG_SETTLE_MS + TAG_ABSENT_PLAYING_MS + 1000;
+       t += NFC_PLAYBACK_POLL_MS)
+    if (tagMissTick(misses, confirmed, false, t)) { stopped = true; break; }
+  TEST_ASSERT_TRUE(stopped);
+}
+
+void test_a_single_miss_never_stops_playback() {
+  uint8_t misses = 0; bool confirmed = true;   // already established
+  TEST_ASSERT_FALSE(tagMissTick(misses, confirmed, false, 999999));
+}
+
+void test_intermittent_reads_never_accumulate_to_a_stop() {
+  // miss, seen, miss, seen ... a flaky-but-present tag must keep playing.
+  uint8_t misses = 0; bool confirmed = false;
+  for (uint32_t t = 0; t < 60000; t += NFC_PLAYBACK_POLL_MS) {
+    TEST_ASSERT_FALSE(tagMissTick(misses, confirmed, false, t));
+    TEST_ASSERT_FALSE(tagMissTick(misses, confirmed, true,  t + 1));
+  }
+}
+
+void test_nfc_read_budget_fits_the_dma_ring_at_every_rate() {
+  // The read blocks the streaming loop, so it must fit inside the audio
+  // already queued. The ring holds a fixed frame count, so its duration
+  // shrinks as the rate rises — at 192 kHz it is only ~43 ms, less than the
+  // 50 ms nominal read, and a fixed timeout would underrun on every poll.
+  const uint32_t rates[] = {8000, 22050, 44100, 48000, 96000, 176400, 192000};
+  for (size_t i = 0; i < sizeof(rates) / sizeof(rates[0]); i++) {
+    uint32_t ringMs = (8UL * 1024UL * 1000UL) / rates[i];
+    uint32_t budget = nfcReadBudgetMs(rates[i], NFC_RING_USE_PCT);
+    TEST_ASSERT_TRUE(budget <= NFC_PLAYBACK_READ_MS);   // never exceeds nominal
+    TEST_ASSERT_TRUE(budget < ringMs);                  // leaves refill headroom
+    TEST_ASSERT_TRUE(budget >= 1);                      // always makes progress
+  }
+}
+
+void test_nfc_read_budget_is_unchanged_at_normal_rates() {
+  // Everything the web UI produces is 44.1 kHz, and the whole point of the
+  // widening was to reach 50 ms there — the cap must not claw that back.
+  TEST_ASSERT_EQUAL_UINT32(NFC_PLAYBACK_READ_MS, nfcReadBudgetMs(44100, NFC_RING_USE_PCT));
+  TEST_ASSERT_EQUAL_UINT32(NFC_PLAYBACK_READ_MS, nfcReadBudgetMs(48000, NFC_RING_USE_PCT));
+  TEST_ASSERT_EQUAL_UINT32(NFC_PLAYBACK_READ_MS, nfcReadBudgetMs(96000, NFC_RING_USE_PCT));
+  // ...and must claw it back where the ring is genuinely too small.
+  TEST_ASSERT_TRUE(nfcReadBudgetMs(192000, NFC_RING_USE_PCT) < NFC_PLAYBACK_READ_MS);
+  TEST_ASSERT_TRUE(nfcReadBudgetMs(176400, NFC_RING_USE_PCT) < NFC_PLAYBACK_READ_MS);
+}
+
+void test_nfc_read_budget_handles_a_bogus_sample_rate() {
+  // A corrupt header could report 0; don't divide by it.
+  TEST_ASSERT_EQUAL_UINT32(NFC_PLAYBACK_READ_MS, nfcReadBudgetMs(0, NFC_RING_USE_PCT));
+}
+
+void test_settle_backstop_is_not_absurdly_long() {
+  // It only delays a genuine stop; audio must not run on for ages after a
+  // tag is lifted before it was ever read.
+  TEST_ASSERT_TRUE(TAG_SETTLE_MS <= 2000);
+  // And each in-playback read must fit comfortably inside its own interval.
+  TEST_ASSERT_TRUE(NFC_PLAYBACK_READ_MS < NFC_PLAYBACK_POLL_MS);
+}
+
+// --- Long-press indicator ------------------------------------------
+
+void test_hold_progress_hidden_until_hint_delay() {
+  // A normal click must never flash the indicator, so anything shorter than
+  // the hint delay reports "hidden" rather than 0%.
+  TEST_ASSERT_EQUAL_INT(-1, holdProgressPct(0, 200, 600));
+  TEST_ASSERT_EQUAL_INT(-1, holdProgressPct(199, 200, 600));
+  TEST_ASSERT_EQUAL_INT(0,  holdProgressPct(200, 200, 600));
+}
+
+void test_hold_progress_is_linear_to_the_threshold() {
+  // Linear, not eased: the bar reports how much longer the user must hold.
+  TEST_ASSERT_EQUAL_INT(25,  holdProgressPct(300, 200, 600));
+  TEST_ASSERT_EQUAL_INT(50,  holdProgressPct(400, 200, 600));
+  TEST_ASSERT_EQUAL_INT(75,  holdProgressPct(500, 200, 600));
+  TEST_ASSERT_EQUAL_INT(100, holdProgressPct(600, 200, 600));
+}
+
+void test_hold_progress_saturates_past_threshold() {
+  TEST_ASSERT_EQUAL_INT(100, holdProgressPct(5000, 200, 600));
+}
+
+void test_hold_progress_survives_degenerate_config() {
+  // hintDelay >= holdMs would divide by zero; once the delay is reached there
+  // is no span left to ramp over, so report complete instead.
+  TEST_ASSERT_EQUAL_INT(100, holdProgressPct(600, 600, 600));
+  TEST_ASSERT_EQUAL_INT(100, holdProgressPct(800, 800, 600));
+  // The hint delay still gates: below it, nothing is shown either way.
+  TEST_ASSERT_EQUAL_INT(-1, holdProgressPct(500, 600, 600));
+  TEST_ASSERT_EQUAL_INT(-1, holdProgressPct(700, 800, 600));
+}
+
+// ----------------------------------------------------------------
+//  QR code — placement maths and the encoder's real limits
+// ----------------------------------------------------------------
+
+// Mirrors the constants in screen.cpp.
+static const uint8_t TEST_QR_VERSION  = 4;
+static const int     TEST_QR_MODULES  = 33;
+static const size_t  TEST_QR_CAPACITY = 62;
+
+// NOTE: do not probe capacity by feeding the encoder ever-longer strings.
+// qrcode_initBytes() writes the codewords without ever checking them against
+// the symbol's capacity, so over-long input overruns the buffer and crashes
+// rather than returning an error. An earlier version of this test did exactly
+// that and segfaulted. Everything below stays at or under capacity.
+
+void test_qr_capacity_is_the_medium_ecc_figure() {
+  // A string exactly at capacity must encode cleanly. This pins the constant
+  // that screen.cpp's static_assert relies on — and that assert is the only
+  // guard against the overflow described above, so it has to be right.
+  //
+  // 62 (not 78) because the library's ECC_* constants are off by one against
+  // its own table: ECC_LOW indexes the Medium codeword counts, so we get
+  // Medium correction and Medium capacity.
+  QRCode qr;
+  uint8_t buf[qrcode_getBufferSize(TEST_QR_VERSION)];
+  char s[TEST_QR_CAPACITY + 1];
+  memset(s, 'a', TEST_QR_CAPACITY);
+  s[TEST_QR_CAPACITY] = '\0';
+
+  TEST_ASSERT_EQUAL_INT(0, qrcode_initText(&qr, buf, TEST_QR_VERSION, ECC_LOW, s));
+  TEST_ASSERT_EQUAL_INT(TEST_QR_MODULES, qr.size);
+}
+
+void test_release_url_fits_with_headroom() {
+  // The shipped URL must not sit right on the limit: at capacity, adding a
+  // character to the org or repo name would overflow rather than fail loudly.
+  const char *url = "https://github.com/qxzzxq/TinyJuke/releases/latest";
+  TEST_ASSERT_TRUE(strlen(url) < TEST_QR_CAPACITY);
+  TEST_ASSERT_TRUE(TEST_QR_CAPACITY - strlen(url) >= 8);   // room to rename
+
+  QRCode qr;
+  uint8_t buf[qrcode_getBufferSize(TEST_QR_VERSION)];
+  TEST_ASSERT_EQUAL_INT(0, qrcode_initText(&qr, buf, TEST_QR_VERSION, ECC_LOW, url));
+}
+
+void test_qr_symbol_size_matches_the_version_formula() {
+  // QR_MODULES in screen.cpp is computed as 4*version+17; the drawing code
+  // sizes the whole layout from it, so a mismatch would misplace every module.
+  QRCode qr;
+  uint8_t buf[qrcode_getBufferSize(TEST_QR_VERSION)];
+  TEST_ASSERT_EQUAL_INT(0, qrcode_initText(&qr, buf, TEST_QR_VERSION, ECC_LOW,
+                                           "https://example.com/releases/latest"));
+  TEST_ASSERT_EQUAL_INT(TEST_QR_MODULES, qr.size);
+  TEST_ASSERT_EQUAL_INT(TEST_QR_MODULES, 4 * TEST_QR_VERSION + 17);
+}
+
+void test_qr_has_finder_patterns_in_three_corners() {
+  // Structural sanity that we produced a real symbol rather than an empty or
+  // corrupted buffer: a finder is a solid 7x7 dark ring with a light gap.
+  QRCode qr;
+  uint8_t buf[qrcode_getBufferSize(TEST_QR_VERSION)];
+  TEST_ASSERT_EQUAL_INT(0, qrcode_initText(&qr, buf, TEST_QR_VERSION, ECC_LOW,
+                                           "https://example.com/releases/latest"));
+  const int last = TEST_QR_MODULES - 7;
+  const int corners[3][2] = {{0, 0}, {last, 0}, {0, last}};
+  for (int c = 0; c < 3; c++) {
+    int ox = corners[c][0], oy = corners[c][1];
+    for (int i = 0; i < 7; i++) {
+      TEST_ASSERT_TRUE(qrcode_getModule(&qr, ox + i, oy));         // top edge
+      TEST_ASSERT_TRUE(qrcode_getModule(&qr, ox + i, oy + 6));     // bottom edge
+      TEST_ASSERT_TRUE(qrcode_getModule(&qr, ox, oy + i));         // left edge
+      TEST_ASSERT_TRUE(qrcode_getModule(&qr, ox + 6, oy + i));     // right edge
+    }
+    TEST_ASSERT_FALSE(qrcode_getModule(&qr, ox + 1, oy + 1));      // light gap
+    TEST_ASSERT_TRUE(qrcode_getModule(&qr, ox + 3, oy + 3));       // dark core
+  }
+}
+
+void test_qr_place_centres_and_reserves_the_quiet_zone() {
+  // The quiet zone is not decoration — without it many scanners never lock on,
+  // so it must be inside the drawn (light) square, not borrowed from the
+  // surrounding dark UI.
+  QrPlacement p = qrPlace(33, 0, 96, 240, 168);
+  const int total = 33 + 2 * QR_QUIET_MODULES;      // 41
+
+  TEST_ASSERT_EQUAL_INT(168 / total, p.scale);      // 4 px per module
+  TEST_ASSERT_EQUAL_INT(total * p.scale, p.size);
+  TEST_ASSERT_EQUAL_INT((240 - p.size) / 2, p.x);   // centred horizontally
+  TEST_ASSERT_EQUAL_INT(96 + (168 - p.size) / 2, p.y);
+  // Modules start one quiet zone in on both axes.
+  TEST_ASSERT_EQUAL_INT(p.x + QR_QUIET_MODULES * p.scale, p.originX);
+  TEST_ASSERT_EQUAL_INT(p.y + QR_QUIET_MODULES * p.scale, p.originY);
+  // And the symbol plus both quiet zones stays inside the box.
+  TEST_ASSERT_TRUE(p.x >= 0 && p.x + p.size <= 240);
+  TEST_ASSERT_TRUE(p.y >= 96 && p.y + p.size <= 96 + 168);
+}
+
+void test_qr_place_uses_whole_pixel_modules() {
+  // A fractional scale would make some modules a pixel wider than others and
+  // smear the edges scanners measure against.
+  for (int box = 60; box <= 240; box += 7) {
+    QrPlacement p = qrPlace(33, 0, 0, box, box);
+    if (p.scale < 1) continue;
+    TEST_ASSERT_EQUAL_INT(p.size, p.scale * (33 + 2 * QR_QUIET_MODULES));
+    TEST_ASSERT_TRUE(p.size <= box);
+  }
+}
+
+void test_qr_place_reports_when_it_cannot_fit() {
+  // Too small to render legibly — the caller draws nothing rather than a
+  // scrambled half-symbol.
+  TEST_ASSERT_EQUAL_INT(0, qrPlace(33, 0, 0, 40, 40).scale);
+  TEST_ASSERT_EQUAL_INT(0, qrPlace(0,  0, 0, 240, 240).scale);
+  TEST_ASSERT_EQUAL_INT(0, qrPlace(-1, 0, 0, 240, 240).scale);
 }
 
 // ----------------------------------------------------------------
@@ -1088,7 +1556,8 @@ int main() {
   RUN_TEST(test_fsm_tag_arrival_triggers_playback);
   RUN_TEST(test_fsm_no_retrigger_while_tag_present);
   RUN_TEST(test_fsm_arrival_suppressed_when_sleep_stopped);
-  RUN_TEST(test_fsm_tag_removal_requires_three_misses);
+  RUN_TEST(test_fsm_tag_removal_requires_full_miss_run);
+  RUN_TEST(test_fsm_removal_tolerance_covers_a_read_glitch);
   RUN_TEST(test_fsm_intermittent_glitch_does_not_remove_tag);
   RUN_TEST(test_fsm_removal_clears_sleep_stopped);
   RUN_TEST(test_fsm_sleep_timer_fired_sets_sleep_stopped);
@@ -1104,8 +1573,52 @@ int main() {
   RUN_TEST(test_fsm_nfc_does_not_wake_when_sleep_stopped);
   RUN_TEST(test_fsm_sleep_idle_no_event_stays_asleep);
   RUN_TEST(test_fsm_hold_enters_menu_from_waiting);
+  RUN_TEST(test_fsm_hold_outcome_ignores_nfc_state);
   RUN_TEST(test_fsm_encoder_rotation_resets_idle_clock);
   RUN_TEST(test_fsm_full_sleep_timer_recovery_scenario);
+
+  RUN_TEST(test_anim_progress_spans_zero_to_full);
+  RUN_TEST(test_anim_progress_clamps_past_duration);
+  RUN_TEST(test_anim_progress_zero_duration_is_complete);
+  RUN_TEST(test_ease_out_cubic_endpoints_are_exact);
+  RUN_TEST(test_ease_out_cubic_front_loads_the_motion);
+  RUN_TEST(test_ease_out_cubic_is_monotonic);
+  RUN_TEST(test_anim_lerp_endpoints_and_midpoint);
+  RUN_TEST(test_anim_lerp_handles_descending_range);
+  RUN_TEST(test_anim_value_interpolates_then_settles);
+  RUN_TEST(test_anim_done_reports_completion);
+  RUN_TEST(test_anim_retarget_mid_flight_starts_from_current_value);
+  RUN_TEST(test_anim_survives_millis_wrap);
+  RUN_TEST(test_anim_settle_is_an_idle_animation);
+
+  RUN_TEST(test_tag_absent_misses_never_accepts_a_single_miss);
+  RUN_TEST(test_tag_absent_misses_covers_the_confirm_window);
+  RUN_TEST(test_tag_absent_misses_rounds_up_not_down);
+  RUN_TEST(test_tag_absent_misses_saturates_at_uint8);
+  RUN_TEST(test_tag_presence_periods_stay_within_their_windows);
+  RUN_TEST(test_playback_ignores_misses_while_the_tag_is_landing);
+  RUN_TEST(test_early_misses_are_discarded_not_banked);
+  RUN_TEST(test_playback_debounces_normally_once_the_tag_is_seen);
+  RUN_TEST(test_playback_stops_for_a_tag_that_never_lands);
+  RUN_TEST(test_a_single_miss_never_stops_playback);
+  RUN_TEST(test_intermittent_reads_never_accumulate_to_a_stop);
+  RUN_TEST(test_nfc_read_budget_fits_the_dma_ring_at_every_rate);
+  RUN_TEST(test_nfc_read_budget_is_unchanged_at_normal_rates);
+  RUN_TEST(test_nfc_read_budget_handles_a_bogus_sample_rate);
+  RUN_TEST(test_settle_backstop_is_not_absurdly_long);
+
+  RUN_TEST(test_hold_progress_hidden_until_hint_delay);
+  RUN_TEST(test_hold_progress_is_linear_to_the_threshold);
+  RUN_TEST(test_hold_progress_saturates_past_threshold);
+  RUN_TEST(test_hold_progress_survives_degenerate_config);
+
+  RUN_TEST(test_qr_capacity_is_the_medium_ecc_figure);
+  RUN_TEST(test_release_url_fits_with_headroom);
+  RUN_TEST(test_qr_symbol_size_matches_the_version_formula);
+  RUN_TEST(test_qr_has_finder_patterns_in_three_corners);
+  RUN_TEST(test_qr_place_centres_and_reserves_the_quiet_zone);
+  RUN_TEST(test_qr_place_uses_whole_pixel_modules);
+  RUN_TEST(test_qr_place_reports_when_it_cannot_fit);
 
   return UNITY_END();
 }
