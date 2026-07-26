@@ -255,7 +255,9 @@ void drawNowPlayingScreen(const TagInfo &tag) {
 
     if (artist) {
       char artistBuf[64];
-      if (album) snprintf(artistBuf, sizeof(artistBuf), "%s  \267  %s", artist, album);
+      // Plain ASCII separator: the built-in GFX font is 7-bit, so the Latin-1
+      // middle dot (\267) that used to sit here rendered as a garbage glyph.
+      if (album) snprintf(artistBuf, sizeof(artistBuf), "%s - %s", artist, album);
       else snprintf(artistBuf, sizeof(artistBuf), "%s", artist);
       int artistMaxW = gfx.width() - 2 * marginForSize(1);
       truncateToFit(artistBuf, buf, sizeof(buf), artistMaxW, 1);
