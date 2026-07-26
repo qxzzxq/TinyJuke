@@ -148,6 +148,12 @@ uint32_t activityIdleMs() {
   return millis() - s_state.lastActivityMs;
 }
 
+// Missed reads that confirm removal at the between-repeats poll cadence.
+static const uint8_t REPLAY_ABSENT_CONFIRM =
+    tagAbsentMisses(TAG_ABSENT_PLAYING_MS, NFC_REPLAY_POLL_MS);
+// The unknown-tag screen polls with a 200 ms timeout plus a 30 ms pause.
+static const uint8_t UNKNOWN_ABSENT_CONFIRM = tagAbsentMisses(TAG_ABSENT_IDLE_MS, 230);
+
 // Map raw encoder event integer to FSM-normalized EncEvent.
 static EncEvent normalizeEnc(int ev) {
   if (ev == ENC_NONE)  return EncEvent::None;
@@ -171,16 +177,21 @@ static void runPlayback(const uint8_t *uid, uint8_t uidLength) {
     drawUnknownTagScreen(uid, uidLength);
     char shownUid[32]; uidToStr(uid, uidLength, shownUid);
     uint32_t t = millis();
+    uint8_t  absent = 0;
     while (millis() - t < 10000) {
       int eu = readEncoder();
       if (eu == ENC_CLICK || eu == ENC_HOLD) break;
       uint8_t u[10]; uint8_t uLen = 0;
       if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 200)) {
+        // Same debounce as everywhere else: one missed read while the tag
+        // settles must not dismiss the screen.
+        if (++absent < UNKNOWN_ABSENT_CONFIRM) { delay(30); continue; }
         s_state.tagPresent = false;
         Serial.println("Tag removed.");
         drawWaitingScreen();
         return;
       }
+      absent = 0;
       if (uLen <= 10) {
         char currentUid[32]; uidToStr(u, uLen, currentUid);
         if (strcmp(currentUid, shownUid) != 0) {
@@ -215,9 +226,17 @@ static void runPlayback(const uint8_t *uid, uint8_t uidLength) {
       break;
     }
 
-    // Quick NFC check: detect tag removal or tag swap before replay
+    // NFC check between repeats: detect tag removal or tag swap.
+    // Debounced — a tag that is still settling in the field can miss a read
+    // right after playback stops, and treating that as a removal makes the
+    // track stop and immediately restart.
     uint8_t u[10]; uint8_t uLen = 0;
-    if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 50)) {
+    bool seen = false;
+    for (uint8_t miss = 0; miss < REPLAY_ABSENT_CONFIRM; miss++) {
+      seen = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, NFC_REPLAY_POLL_MS);
+      if (seen) break;
+    }
+    if (!seen) {
       Serial.println("Tag removed.");
       localPresent = false;
       s_state.tagPresent = false;

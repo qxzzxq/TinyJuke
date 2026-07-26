@@ -1140,6 +1140,97 @@ void test_anim_settle_is_an_idle_animation() {
   TEST_ASSERT_TRUE(animDone(a, 5000));
 }
 
+// ----------------------------------------------------------------
+//  Tag-presence policy — miss counts derived from poll cadence
+// ----------------------------------------------------------------
+
+void test_tag_absent_misses_never_accepts_a_single_miss() {
+  // The whole point of this helper. A tag placed quickly skims the edge of
+  // the reader's field and can miss a read while it settles; if one miss
+  // could confirm removal, playback would stop and instantly restart.
+  TEST_ASSERT_GREATER_OR_EQUAL_UINT8(2, tagAbsentMisses(450, 150));
+  TEST_ASSERT_GREATER_OR_EQUAL_UINT8(2, tagAbsentMisses(900, 100));
+  // Even when the poll period alone already exceeds the window.
+  TEST_ASSERT_EQUAL_UINT8(2, tagAbsentMisses(50, 500));
+  TEST_ASSERT_EQUAL_UINT8(2, tagAbsentMisses(0, 100));
+}
+
+void test_tag_absent_misses_covers_the_confirm_window() {
+  // count * period must reach the requested duration, or a tag would be
+  // called removed sooner than the policy says.
+  const uint32_t cases[][2] = {
+    {900, 100}, {450, 150}, {450, 50}, {900, 230}, {600, 70},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    uint32_t confirmMs = cases[i][0], period = cases[i][1];
+    uint32_t covered = (uint32_t)tagAbsentMisses(confirmMs, period) * period;
+    TEST_ASSERT_TRUE(covered >= confirmMs);
+  }
+}
+
+void test_tag_absent_misses_rounds_up_not_down() {
+  // Truncating would under-cover the window by up to one whole poll period.
+  TEST_ASSERT_EQUAL_UINT8(9, tagAbsentMisses(900, 100));   // exact
+  TEST_ASSERT_EQUAL_UINT8(3, tagAbsentMisses(450, 150));   // exact
+  TEST_ASSERT_EQUAL_UINT8(5, tagAbsentMisses(900, 200));   // 4.5 -> 5
+  TEST_ASSERT_EQUAL_UINT8(4, tagAbsentMisses(900, 230));   // 3.9 -> 4
+}
+
+void test_tag_absent_misses_saturates_at_uint8() {
+  TEST_ASSERT_EQUAL_UINT8(255, tagAbsentMisses(1000000, 1));
+}
+
+void test_tag_presence_periods_stay_within_their_windows() {
+  // The FSM stores tagAbsentCount as a uint8_t, so every configured pairing
+  // must fit — this is what stops a future cadence change from silently
+  // wrapping the counter and never confirming a removal.
+  TEST_ASSERT_TRUE(tagAbsentMisses(TAG_ABSENT_IDLE_MS,    NFC_POLL_MS)          < 255);
+  TEST_ASSERT_TRUE(tagAbsentMisses(TAG_ABSENT_PLAYING_MS, NFC_PLAYBACK_POLL_MS) < 255);
+  TEST_ASSERT_TRUE(tagAbsentMisses(TAG_ABSENT_PLAYING_MS, NFC_REPLAY_POLL_MS)   < 255);
+
+  // Pin what the shipped configuration actually resolves to. The idle and
+  // playback counts match the values these sites used before the policy was
+  // consolidated, so this change is behaviour-preserving there; the replay
+  // re-poll was previously a single read, which is the bug being fixed.
+  TEST_ASSERT_EQUAL_UINT8(9, tagAbsentMisses(TAG_ABSENT_IDLE_MS,    NFC_POLL_MS));
+  TEST_ASSERT_EQUAL_UINT8(3, tagAbsentMisses(TAG_ABSENT_PLAYING_MS, NFC_PLAYBACK_POLL_MS));
+  TEST_ASSERT_EQUAL_UINT8(9, tagAbsentMisses(TAG_ABSENT_PLAYING_MS, NFC_REPLAY_POLL_MS));
+  // Removal while audio is playing should be confirmed sooner than while
+  // idle — the sound keeps going until we accept it.
+  TEST_ASSERT_TRUE(TAG_ABSENT_PLAYING_MS < TAG_ABSENT_IDLE_MS);
+}
+
+void test_playback_ignores_misses_while_the_tag_settles() {
+  // Observed on hardware: one detection, then playWav() stopping on its own
+  // miss run and the track restarting from zero — twice — before the tag came
+  // to rest. A miss run inside the settle window must not stop playback, no
+  // matter how long it is.
+  TEST_ASSERT_FALSE(playbackShouldStop(3,   0));
+  TEST_ASSERT_FALSE(playbackShouldStop(10,  500));
+  TEST_ASSERT_FALSE(playbackShouldStop(255, TAG_SETTLE_MS - 1));
+}
+
+void test_playback_stops_on_a_miss_run_after_settling() {
+  // Past the settle window a miss run means the tag really is gone.
+  const uint8_t need = tagAbsentMisses(TAG_ABSENT_PLAYING_MS, NFC_PLAYBACK_POLL_MS);
+  TEST_ASSERT_TRUE(playbackShouldStop(need,     TAG_SETTLE_MS));
+  TEST_ASSERT_TRUE(playbackShouldStop(need + 1, TAG_SETTLE_MS + 5000));
+  TEST_ASSERT_FALSE(playbackShouldStop(need - 1, TAG_SETTLE_MS + 5000));
+}
+
+void test_playback_never_stops_on_one_miss() {
+  // The single-miss case that caused the original stop/restart behaviour.
+  TEST_ASSERT_FALSE(playbackShouldStop(1, 0));
+  TEST_ASSERT_FALSE(playbackShouldStop(1, TAG_SETTLE_MS));
+  TEST_ASSERT_FALSE(playbackShouldStop(1, 999999));
+}
+
+void test_settle_window_is_shorter_than_the_shortest_track() {
+  // Sanity: the grace period only delays a genuine stop, it must not be so
+  // long that lifting a tag leaves audio running for an obvious stretch.
+  TEST_ASSERT_TRUE(TAG_SETTLE_MS <= 2000);
+}
+
 // --- Long-press indicator ------------------------------------------
 
 void test_hold_progress_hidden_until_hint_delay() {
@@ -1285,6 +1376,16 @@ int main() {
   RUN_TEST(test_anim_retarget_mid_flight_starts_from_current_value);
   RUN_TEST(test_anim_survives_millis_wrap);
   RUN_TEST(test_anim_settle_is_an_idle_animation);
+
+  RUN_TEST(test_tag_absent_misses_never_accepts_a_single_miss);
+  RUN_TEST(test_tag_absent_misses_covers_the_confirm_window);
+  RUN_TEST(test_tag_absent_misses_rounds_up_not_down);
+  RUN_TEST(test_tag_absent_misses_saturates_at_uint8);
+  RUN_TEST(test_tag_presence_periods_stay_within_their_windows);
+  RUN_TEST(test_playback_ignores_misses_while_the_tag_settles);
+  RUN_TEST(test_playback_stops_on_a_miss_run_after_settling);
+  RUN_TEST(test_playback_never_stops_on_one_miss);
+  RUN_TEST(test_settle_window_is_shorter_than_the_shortest_track);
 
   RUN_TEST(test_hold_progress_hidden_until_hint_delay);
   RUN_TEST(test_hold_progress_is_linear_to_the_threshold);

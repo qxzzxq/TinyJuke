@@ -120,12 +120,9 @@
 // --- Menu ---
 #define MENU_ITEM_COUNT      9
 
-// --- NFC polling ---
-// Waiting-screen poll period. readPassiveTargetID blocks for this long when no
-// tag is present, so it sets the loop cadence — short enough to keep the hold
-// indicator and tag detection responsive. TAG_ABSENT_CONFIRM in
-// jukebox_state.h is sized against this value; change both together.
-#define NFC_POLL_MS         100
+// --- NFC polling / tag-presence policy ---
+// Poll periods and the removal-confirmation windows live in tag_presence.h,
+// which derives each site's miss count from its own cadence.
 
 // --- UI animation ---
 // Motion is only used where it carries information: how far a hold has

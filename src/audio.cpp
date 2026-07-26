@@ -8,6 +8,7 @@
 #include "volume_logic.h"
 #include "anim.h"
 #include "storage.h"  // sdOpenRead()
+#include "tag_presence.h"
 #include <driver/i2s.h>
 
 bool audioPlaying = false;
@@ -243,11 +244,15 @@ void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t ta
       break;
     }
 
-    if (millis() - lastNfcCheck >= 150) {
+    if (millis() - lastNfcCheck >= NFC_PLAYBACK_POLL_MS) {
       lastNfcCheck = millis();
       uint8_t u[10]; uint8_t uLen = 0;
       if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 30)) {
-        if (++tagAbsentCount >= 3) stopRequested = true;
+        // audioStartTime is stamped when the tag was detected, so this also
+        // covers the settle window in which misses are not yet meaningful.
+        if (tagAbsentCount < 255) tagAbsentCount++;
+        if (playbackShouldStop(tagAbsentCount, millis() - audioStartTime))
+          stopRequested = true;
       } else {
         tagAbsentCount = 0;
         // Detect tag swap: different UID → stop and let main loop pick up new tag
