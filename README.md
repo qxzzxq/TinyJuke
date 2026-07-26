@@ -1,5 +1,7 @@
 # TinyJuke
 
+![](docs/img/tinyjuke.jpg)
+
 A little music box you control with physical objects. Put a tagged object on top
 and its song plays. Lift it off and the music stops. Swap it for another and the
 next song starts.
