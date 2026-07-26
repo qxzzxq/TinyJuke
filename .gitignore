@@ -57,3 +57,6 @@ Makefile
 
 issues.md
 docs/v3/*
+
+# Generated docs site (tools/build_docs.py) — built in CI, never committed
+site/

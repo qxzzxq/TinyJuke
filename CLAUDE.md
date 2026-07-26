@@ -1,38 +1,31 @@
 # CLAUDE.md — TinyJuke
 
+> **Reference docs live in `docs/`, not here.** Pin maps, wiring, SD card format,
+> build profiles, and the HTTP API are documented once in
+> **[docs/technical-reference.md](docs/technical-reference.md)**. `README.md` is the
+> user guide. This file covers architecture, design decisions, and the workflow —
+> the things an agent needs that a user doesn't. Don't copy reference tables back
+> in here; link to them.
+
 ## Project overview
 
-RFID-driven audio player. Scan an NFC tag → lookup UID in `tags.json` on SD card → play the mapped WAV file through a MAX98357A I²S amplifier. Built on a Lolin D32 Pro (ESP32) with Arduino framework on PlatformIO. Display: ST7789V 240×320.
+RFID-driven audio player. Scan an NFC tag → lookup UID in `tags.json` on SD card → play the mapped WAV file through a MAX98357A I²S amplifier. Arduino framework on PlatformIO, ESP32. Display: ST7789V 240×320. Two hardware targets: the custom WROVER-E mainboard (the `wrover_e` env, `default_envs`) and the Lolin D32 Pro; `config.h` keys off `BOARD_WROVER_E` (`#if`/`#else`, D32 Pro is the default branch).
 
-**Status:** Milestone 4 in progress — Bluetooth A2DP sink mode reachable from the menu, with AVRCP metadata display (ASCII-only fallback to "Bluetooth"), encoder volume control via the ESP32-A2DP library's internal volume, sleep-timer + power-save integration, and an RFID tag-detected prompt that hands off to jukebox playback. WiFi (Web Server) and Bluetooth are mutually exclusive in the UI. A Color Theme menu item swaps the whole UI palette at runtime among several dark themes (persisted to `/theme.cfg`). Web UI has a Music tab: list `/music/` files (size, duration, embedded title/artist, linked-tag count), edit metadata (written into the WAV's LIST INFO chunk), delete with tag-cascade. OTA firmware updates via the System tab (16 MB partition table, two 6 MB app slots; first flash after the table switch must be over USB).
+**Status:** Milestone 4 in progress — Bluetooth A2DP sink mode reachable from the menu, with AVRCP metadata display (ASCII-only fallback to "Bluetooth"), encoder volume control via the ESP32-A2DP library's internal volume, sleep-timer + power-save integration, and an RFID tag-detected prompt that hands off to jukebox playback. WiFi (Web Server) and Bluetooth are mutually exclusive in the UI. A Color Theme menu item swaps the whole UI palette at runtime among several dark themes (persisted to `/theme.cfg`). Web UI has a Music tab: list `/music/` files (size, duration, embedded title/artist, linked-tag count), edit metadata (written into the WAV's LIST INFO chunk), delete with tag-cascade. OTA firmware updates via the System tab (dual-app-slot partition tables; the first flash after switching a device onto one must be over USB).
 
 Earlier (Milestone 3): tag hot-swap detection, brightness / power-save / sleep-timer settings persisted to SD, BMP album art (240×240, scaled in PSRAM), version screen, image upload, browser-side MP3/M4A/AAC/OGG/FLAC → WAV conversion with embedded-art extraction, and amp-touch-noise mitigation via I2S priming.
 
-## Pin map
+## Hardware
 
-| GPIO | Function          | Notes                                    |
-|------|-------------------|------------------------------------------|
-| 4    | SD_CS             |                                          |
-| 14   | TFT_CS            |                                          |
-| 18   | SCK (VSPI)        | Shared: TFT SCL + SD_SCK                 |
-| 19   | MISO (VSPI)       | SD only (ST7789V is write-only)          |
-| 23   | MOSI (VSPI)       | Shared: TFT SDA + SD_MOSI                |
-| 27   | TFT_DC            |                                          |
-| 32   | TFT_BL            | LEDC PWM (brightness control)          |
-| 33   | TFT_RST           |                                          |
-| 13   | PN532_RX (ESP TX) | ESP32 TX → PN532 RX                     |
-| 22   | PN532_TX (ESP RX) | PN532 TX → ESP32 GPIO 22 (UART2 RX)     |
-| 21   | I2S_BCLK          |                                          |
-| 25   | I2S_DOUT          |                                          |
-| 26   | I2S_LRC           |                                          |
-| 36   | ENC_CLK           |                                          |
-| 5    | ENC_DT            |                                          |
-| 34   | ENC_SW            | Input-only (external pull-up on module)  |
-| 35   | VBAT              | Unused                                   |
+Pin tables (both boards), wiring, MAX98357A configuration pins, and the BOM:
+**[docs/technical-reference.md § 1](docs/technical-reference.md#1-hardware)**.
+`src/config.h` is the code-side source of truth for pin numbers.
 
-MAX98357A config: GAIN → GND (12 dB), SD/Mode → float (mono mix). Volume is software-controlled via encoder (runtime adjustable, persisted to `/volume.cfg` on SD). A separate max-volume setting (persisted to `/maxvolume.cfg`) caps loudness with mode-dependent semantics: in jukebox (WAV) playback it is a **scale factor** — the volume bar keeps its full 0–100 range and the effective output level is `effectiveVolume(vol, maxVol) = vol × maxVol / 100`; in Bluetooth mode it is a **clamp** — `volumeLevel` is limited to `maxVolumeLevel` on BT entry, encoder turns, and phone-pushed AVRCP volume (the value handed to the A2DP stack is echoed to the phone's slider, so scaling there would feedback-fight the phone). The Volume screen shows both parameters: rotate adjusts the active one, CLICK toggles Volume/Max Volume, HOLD saves both and returns to the menu. Brightness is also software-controlled via encoder (persisted to `/brightness.cfg` on SD). Power saving (persisted to `/powersave.cfg`) turns off the display after idle timeout. Audio sleep timer (persisted to `/sleeptimer.cfg`) stops playback after the configured duration. The UI color theme (persisted to `/theme.cfg`) selects one of several dark palettes (defined in `theme.cpp`); the whole `C_` color set is swapped at runtime by `applyTheme()`, and the Color Theme screen rotates through palettes with live preview (CLICK/HOLD saves, default = Bamboo Moss, index `THEME_DEFAULT`).
+## Settings & persistence
 
-KY-040 encoder: CLK→GPIO36, DT→GPIO5, SW→GPIO34, +→3.3V, GND→GND. GPIO 34 and 36 are input-only but the module's external 10k pull-up resistors make them work.
+Volume is software-controlled via encoder (runtime adjustable, persisted to `/volume.cfg` on SD). A separate max-volume setting (persisted to `/maxvolume.cfg`) caps loudness with mode-dependent semantics: in jukebox (WAV) playback it is a **scale factor** — the volume bar keeps its full 0–100 range and the effective output level is `effectiveVolume(vol, maxVol) = vol × maxVol / 100`; in Bluetooth mode it is a **clamp** — `volumeLevel` is limited to `maxVolumeLevel` on BT entry, encoder turns, and phone-pushed AVRCP volume (the value handed to the A2DP stack is echoed to the phone's slider, so scaling there would feedback-fight the phone). The Volume screen shows both parameters: rotate adjusts the active one, CLICK toggles Volume/Max Volume, HOLD saves both and returns to the menu. Brightness is also software-controlled via encoder (persisted to `/brightness.cfg` on SD). Power saving (persisted to `/powersave.cfg`) turns off the display after idle timeout. Audio sleep timer (persisted to `/sleeptimer.cfg`) stops playback after the configured duration. The UI color theme (persisted to `/theme.cfg`) selects one of several dark palettes (defined in `theme.cpp`); the whole `C_` color set is swapped at runtime by `applyTheme()`, and the Color Theme screen rotates through palettes with live preview (CLICK/HOLD saves, default = Bamboo Moss, index `THEME_DEFAULT`).
+
+Where each of these lands on the card: [docs/technical-reference.md § 2](docs/technical-reference.md#2-sd-card-layout).
 
 ## VSPI bus sharing
 
@@ -69,26 +62,25 @@ src/
 ├── bluetooth.h/.cpp  — A2DP sink wrapper: lifecycle, AVRCP metadata (ASCII-validated), NFC poll for tag-switch prompt, sleep-timer integration
 └── main.cpp          — Peripherals (bus, gfx, nfc), setup(), loop(), sleep/wake logic
 test/test_pure/       — Unity tests for pure logic; runs on host via `pio test -e native`
-platformio.ini        — PlatformIO config + deps; board/flash mixins → envs: lolin_d32_pro (default), -4mb, -debug, wrover_e, wrover_e-debug, lolin_d32 (WROOM-32, no PSRAM), native
-README.md             — User-facing docs (wiring, build steps, SD layout)
+platformio.ini        — PlatformIO config + deps; board/flash mixins → envs (see docs/technical-reference.md § 3.2)
+README.md             — User guide: what it does, how to use it, adding music
+docs/technical-reference.md — Pin maps, wiring, SD format, build profiles, HTTP API
+tools/build_docs.py   — Renders README + docs/*.md into the site/ HTML published to GitHub Pages
 ```
 
 `playWav(filepath, nfc, tagUid, tagUidLen)` takes the active tag's UID so the per-150ms NFC poll can distinguish "tag absent" (3 misses → stop) from "tag swapped" (different UID → stop). Globals in audio.cpp: `audioPlaying`, `stopRequested`, `sleepTimerFired`, `audioStartTime`. `handleWebClient()` is not called during playback; the web server only runs while the GUI is on the WEB screen.
 
-## Libraries (platformio.ini)
+## Libraries
 
-| Library          | Source                                        | Purpose              |
-|------------------|-----------------------------------------------|----------------------|
-| Arduino_GFX      | `moononournation/Arduino_GFX.git`             | TFT display (ST7789) |
-| ArduinoJson      | `bblanchon/ArduinoJson @ ^7`                  | Parse `/tags.json`   |
-| ESP32-A2DP       | `pschatzmann/ESP32-A2DP.git#v1.8.11`          | Bluetooth A2DP sink  |
-| PN532 + PN532_HSU| Bundled in `lib/`                             | NFC reader           |
-| SD               | Built-in (Arduino ESP32 framework)            | SD card access       |
-| WiFi + WebServer | Built-in (Arduino ESP32 framework)            | AP mode + REST API   |
+Full table with sources, version pins, and the reasoning behind each pin:
+[docs/technical-reference.md § 3.6](docs/technical-reference.md#36-libraries).
 
-WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, deprecated but functional). ESP32-A2DP is built with `-DA2DP_LEGACY_I2S_SUPPORT=1` so it uses the same legacy I2S path; `initBluetoothMode()` calls `i2sDeinit()` to release our driver before A2DP installs its own, and `stopBluetoothMode()` calls `i2sPrime()` afterward to restore amp pin drive.
-
-**Platform:** pinned to `pioarduino/platform-espressif32@54.03.20` (arduino-esp32 3.x). 3.x is required for `ledcAttach`, the renamed `i2s_config_t` fields (`dma_desc_num`/`dma_frame_num`), and an in-framework Bluetooth Classic + Bluedroid build.
+The one interaction worth keeping in mind while editing audio code: WAV playback
+uses the ESP32's built-in legacy I2S driver (`driver/i2s.h`), and ESP32-A2DP is
+built with `-DA2DP_LEGACY_I2S_SUPPORT=1` so it shares that same path. The two
+cannot both own the driver, so `initBluetoothMode()` calls `i2sDeinit()` to
+release ours before A2DP installs its own, and `stopBluetoothMode()` calls
+`i2sPrime()` afterward to restore amp pin drive.
 
 ## Encoder events
 
@@ -135,51 +127,31 @@ WAV audio uses the ESP32's built-in I2S driver (`driver/i2s.h` — legacy API, d
 
 ## SD card layout
 
-```
-/
-├── img/                # Album art (BMP, 24-bit, auto-scaled to 240×240)
-│   └── album1.bmp
-├── music/              # WAV files (standard PCM, any sample rate)
-│   └── song.wav
-├── tags.json           # UID → file + metadata mapping (managed by web UI)
-├── volume.cfg          # Persisted volume level 0–100 (plain text)
-├── maxvolume.cfg       # Persisted max-volume ceiling 0–100 (plain text)
-├── brightness.cfg      # Persisted brightness level 0–100 (plain text)
-├── powersave.cfg        # Persisted power save timeout in minutes (0=off, plain text)
-├── sleeptimer.cfg      # Persisted audio sleep timer in minutes (0=off, plain text)
-└── theme.cfg           # Persisted UI color-theme index (plain text)
-```
+Directory tree, `.cfg` file semantics, and the `tags.json` schema:
+[docs/technical-reference.md § 2](docs/technical-reference.md#2-sd-card-layout).
 
-`tags.json` format (only `file` is required):
-```json
-{
-  "81:0C:2B:07": {
-    "file": "music/sample-12s.wav",
-    "img": "album1.bmp",
-    "title": "My Song",
-    "artist": "Artist Name",
-    "album": "Album Title"
-  }
-}
-```
-
-Paths may or may not start with `/` — `playWav()` prepends it if missing.
+The one thing that bites at the code level: file paths in `tags.json` may or may
+not start with `/` — `playWav()` prepends it if missing.
 
 ## Build & flash
 
+Environments, the board × flash mixin matrix, partition tables, and the full
+command list: [docs/technical-reference.md § 3](docs/technical-reference.md#3-building-and-flashing).
+
+Day-to-day, an agent needs two of them:
+
 ```bash
-~/.platformio/penv/bin/pio run                       # build default (env:lolin_d32_pro)
-~/.platformio/penv/bin/pio run -e lolin_d32_pro-debug # build with -DDEV_MODE
-~/.platformio/penv/bin/pio run -t upload             # flash the default board
-~/.platformio/penv/bin/pio run -e lolin_d32_pro-4mb -t upload  # flash the 4 MB D32 Pro
-~/.platformio/penv/bin/pio run -e wrover_e -t upload # build/flash the custom WROVER-E PCB
-~/.platformio/penv/bin/pio device monitor            # serial (115200 baud)
-~/.platformio/penv/bin/pio test -e native            # run host-side unit tests
+~/.platformio/penv/bin/pio run             # build default (env:wrover_e)
+~/.platformio/penv/bin/pio test -e native  # host-side unit tests
 ```
 
-Framework: `arduino`, CPU: 240 MHz, PSRAM (`BOARD_HAS_PSRAM`) enabled on the PSRAM modules (D32 Pro / WROVER-E) and used by the BMP loader. **The D32 Pro ships in 4 MB and 16 MB flash variants with identical markings** — verify with `esptool.py flash_id` (16 MB main board vs. a 4 MB second board, GD25LQ32). Partition tables: `partitions_16mb_ota.csv` (two 6 MB OTA app slots; the board def claims 4 MB so `board_upload.flash_size`/`maximum_size` are overridden in platformio.ini), `partitions_8mb_ota.csv` (WROVER-E N8R8 — two ~3.94 MB OTA slots, no SPIFFS), and `partitions_4mb_ota.csv` (two ~1.94 MB OTA slots, no SPIFFS — flashing the 16 MB table onto a 4 MB chip boot-loops with "load partition table error").
-
-**Build profiles.** `platformio.ini` factors axes into reusable mixin sections composed with `extends`: a **board** axis (`[board_d32pro]` → `lolin_d32_pro`; `[board_wrover_e]` → generic `esp32dev` + `-DBOARD_WROVER_E`; `[board_lolin_d32]` → plain `lolin_d32`/WROOM-32 + `-DBOARD_WROVER_E`) and a **flash** axis (`[flash_16mb]` / `[flash_8mb]` / `[flash_4mb]`). PSRAM compile flags live in a `psram_flags` fragment in `[common]`, interpolated **only** by the modules that have PSRAM (D32 Pro, WROVER-E) — the WROOM-32 omits them (defining `BOARD_HAS_PSRAM` with no PSRAM present makes the core try to init absent RAM). Pins are board-specific: `config.h` keys off `BOARD_WROVER_E` (`#if`/`#else`, D32 Pro is the default branch). Concrete environments: `lolin_d32_pro` (16 MB), `lolin_d32_pro-4mb`, `lolin_d32_pro-debug` (`-DDEV_MODE` exposes extra short-timeout options on Power Saving and Sleep Timer screens for testing), `wrover_e` (**default**, custom PCB, WROVER-E N8R8 — **8 MB**), `wrover_e-debug`, `lolin_d32` (WROOM-32, 4 MB, **no PSRAM** — a prototype running the new WROVER-E pin map on a plain Lolin D32; large album-art BMPs won't fit in DRAM without PSRAM, so art falls back/skips), and `native` (host-only Unity tests in `test/test_pure/`, no Arduino/ESP-IDF). `default_envs = lolin_d32_pro`, so a bare `pio run` builds the current hardware. The WROVER-E pin map lives in `docs/esp32_wrover_e_pin_map.md`.
+Two traps that have cost real time. **The D32 Pro ships in 4 MB and 16 MB flash
+variants with identical markings** — flashing the 16 MB partition table onto a
+4 MB chip boot-loops with "load partition table error", so verify with
+`esptool.py flash_id` and pick `lolin_d32_pro` vs `lolin_d32_pro-4mb`
+accordingly. And PSRAM flags are interpolated only by boards that have PSRAM:
+defining `BOARD_HAS_PSRAM` on the WROOM-32 (`env:lolin_d32`) makes the core try
+to init RAM that isn't there.
 
 ## Testing
 
@@ -197,7 +169,15 @@ What's covered: `uidToStr`, `lookupTag`, `parseWavHeaderBuffer`, `parseWavMetaBu
 
 2. **Make code changes.** After *every* change:
    - **Verify it compiles.** Run `~/.platformio/penv/bin/pio run` and fix all syntax or compile-time errors before moving on. Never leave the project in a non-building state.
-   - **Cross-validate docs.** Reconcile `CLAUDE.md` and `README.md` against the actual source. Update anything stale — pin maps, source file tree, architecture/data flow, current status, constraints, SD card layout, and TODOs. These docs are the source of truth for future agents and contributors; drift compounds quickly.
+   - **Cross-validate docs.** Reconcile all four against the actual source, and know which one owns what:
+     - `docs/technical-reference.md` — pin maps, wiring, SD card format, build profiles, HTTP API. **The single source of truth for reference material.** Anything factual about hardware or the build goes here and nowhere else.
+     - `README.md` — the user guide. What the device does and how to operate it. It links to the reference; it does not restate it.
+     - `CLAUDE.md` — architecture, design decisions, hard-won constraints, this workflow.
+     - `AGENTS.md` — **a byte-identical copy of `CLAUDE.md`.** Any edit to one must be mirrored to the other (`cp CLAUDE.md AGENTS.md`); they are checked with `diff`.
+
+     **`README.md` and `docs/*.md` are published.** `.github/workflows/pages.yml` renders them to HTML via `tools/build_docs.py` and deploys to GitHub Pages on every push to `main`, so a docs edit is a public site change. Preview locally with `pip install markdown && python3 tools/build_docs.py && open site/index.html`. `site/` is generated and gitignored — never commit it. Adding a new published page means adding it to `PAGES` in the build script; anything not listed there still resolves, because links to unpublished files are rewritten to point at GitHub.
+
+     Update anything stale — source file tree, architecture/data flow, current status, constraints, TODOs. Drift compounds quickly. If you find yourself pasting a table that already exists elsewhere, link instead.
 
 3. **Write tests** — unit tests for new logic, integration tests for cross-module behavior. Run the full suite locally.
 
@@ -216,8 +196,8 @@ What's covered: `uidToStr`, `lookupTag`, `parseWavHeaderBuffer`, `parseWavMetaBu
 - **I2S uses legacy driver:** The `driver/i2s.h` API is deprecated in ESP-IDF 5.x. It works but emits warnings. Migration to `i2s_std.h` is a future task.
 - **Single audio track at a time:** No crossfade or queue. Tag swaps mid-playback are detected (in both `playWav()` and the main loop) — a different UID stops the current track and the new tag is picked up on the next loop iteration. The same tag left on the reader replays the track in a `while (tagPresent)` loop.
 - **WAV only:** Standard PCM WAV (16/24-bit, mono/stereo, any sample rate). No MP3/FLAC support.
-- **Web server uses AP mode:** `WIFI_SSID` / `WIFI_PASSWORD` from config.h. Exposes REST API: `/api/tags` (list), `/api/tag` (POST upsert / DELETE / OPTIONS), `/api/files`, `/api/images`, `/api/music` (list with size/duration/title/artist from a 4 KB head scan), `/api/file/meta` (POST `{name,title,artist}` — write WAV LIST INFO), `/api/file` (DELETE `?name=` — delete file + cascade-remove referencing tags, returns `removed` UIDs), `/img?name=` (serve BMP), `/upload` (WAV multipart), `/upload-img` (image multipart), `/api/version` (firmware version), `/api/scan` (GET — on-demand single-shot PN532 read, 50 ms timeout; returns `{"ok":true,"uid":"AA:BB:..."}` or `uid:null`; no background scan state, safe because the GUI loop owns the PN532 on the WEB screen; the SPA's Add Tag modal polls it every 500 ms to auto-fill the UID field — last scanned tag wins, same-tag repeats don't clobber hand edits, never polled in edit mode, and a generation counter discards in-flight responses after the modal closes so a stale poll can't overwrite a later-opened Edit dialog; a scanned or hand-typed UID that's already registered shows a red "Already registered" warning and disables Save), `/api/verify-pin` (GET `?pin=` — validates the OTA PIN so the SPA can reject a wrong PIN before uploading; shares the `/update` lockout counter and returns 403/429 on bad PIN/lockout), `/update?size=&pin=` (OTA firmware multipart — gated by a per-session 4-digit PIN shown on the device's web screen so AP access alone can't flash the device, with a 5-failure lockout per session to block online brute force; the SPA calls `/api/verify-pin` first so a wrong PIN fails fast instead of after the whole image streams over WiFi, and `/update` still re-checks the PIN server-side at `UPLOAD_FILE_START` — `Update.begin()` never runs on a bad PIN so no firmware is written; `size` is mandatory, exact-size `begin()` with completeness enforced via `end(false)` at END; the Update library rejects non-firmware uploads on the first block via the image magic byte; TFT progress via `drawWebProgress`, reboots on success; **no rollback** — a bad-but-bootable firmware needs USB reflash). Serves a single-page web app at `/` with three tabs: Tags, Music, and System (version + firmware update). The SPA itself accepts WAV/MP3/M4A/AAC/OGG/FLAC for audio upload — non-WAV inputs are decoded via `AudioContext.decodeAudioData` and resampled to 44.1 kHz 16-bit mono via `OfflineAudioContext` entirely client-side, then uploaded as WAV. Embedded cover art (ID3v2 APIC, MP4 `covr`, FLAC PICTURE) is extracted in JS, centre-cropped to 300×300 24-bit BMP via a canvas, and uploaded to `/img/` with the same basename. The firmware-side `/upload` and `/upload-img` handlers remain WAV/BMP-only — no server-side decoding. Web server only runs while the GUI is on the WEB screen — leaving the WEB screen calls `stopWebServer()`. Lifecycle gotchas (learned the hard way): serve `PAGE_HTML` with `server.send_P(..., sizeof(PAGE_HTML)-1)` — the plain `send(const char*)` overload copies the whole page into a heap `String` and silently serves an empty page when that allocation fails; register routes only once (`server.on()` appends to the handler list — re-registering per start/stop cycle leaks heap); tear down as `server.stop()` → `WiFi.softAPdisconnect(false)` → `WiFi.mode(WIFI_OFF)` (the combined `softAPdisconnect(true)` transition races the WiFi stop state, `ESP_ERR_WIFI_STOP_STATE` 12308). `initWebServer()`/`stopWebServer()` log free heap + largest free block for diagnosing fragmentation.
-- **WAV metadata editing (canonical LIST INFO chunk):** `pcmToWavBlob()` in the SPA emits a fixed-size LIST INFO chunk ("LIST"|148|"INFO"|"INAM"|64|title|"IART"|64|artist — 156 bytes, between `fmt ` and `data`), so converted uploads support instant in-place metadata patches (`writeWavMeta()` fast path in web.cpp, opens `"r+"` and overwrites the two 64-byte fields found via `findCanonicalListInfo`). Files without the canonical chunk (passthrough `.wav` uploads, third-party files) take a one-time slow path: streaming rewrite to `<path>.tmp` through a 256 KB PSRAM buffer (fallback: the static 4 KB `wavScanBuf`; existing front LIST INFO dropped, canonical chunk inserted, RIFF size patched from actual bytes written), then `SD.remove` + `SD.rename` — the original is never destroyed before a complete rewrite. Slow path blocks the synchronous web server for the duration (measured ~623 KB/s with the 256 KB PSRAM buffer at a 20 MHz SD clock — ~63 s for a 38 MB track; was ~146 KB/s with the 4 KB buffer at 4 MHz). Progress is drawn on the device's web screen (`drawWebWriteProgress`) and the SPA disables the Save button with a status note meanwhile. `.tmp` leftovers from interrupted rewrites are hidden from `/api/files` and `/api/music` and replaced on the next rewrite attempt. All three listing endpoints (`/api/files`, `/api/images`, `/api/music`) also hide dotfiles — any basename starting with `.` (e.g. macOS `._` resource forks, `.DS_Store`) via `isHiddenName()`. The playback fallback chain (tags.json → WAV LIST INFO → filename) is unchanged.
+- **Web server uses AP mode:** `WIFI_SSID` / `WIFI_PASSWORD` from config.h. The endpoint list, the `/api/scan` polling contract, the OTA PIN/lockout scheme, and the browser-side audio conversion are documented in [docs/technical-reference.md § 4](docs/technical-reference.md#4-web-api) — don't restate them here. What matters at the code level: the firmware-side `/upload` and `/upload-img` handlers are WAV/BMP-only (no server-side decoding), and the server only runs while the GUI is on the WEB screen — leaving it calls `stopWebServer()`, and `handleWebClient()` is never called during playback. Lifecycle gotchas (learned the hard way): serve `PAGE_HTML` with `server.send_P(..., sizeof(PAGE_HTML)-1)` — the plain `send(const char*)` overload copies the whole page into a heap `String` and silently serves an empty page when that allocation fails; register routes only once (`server.on()` appends to the handler list — re-registering per start/stop cycle leaks heap); tear down as `server.stop()` → `WiFi.softAPdisconnect(false)` → `WiFi.mode(WIFI_OFF)` (the combined `softAPdisconnect(true)` transition races the WiFi stop state, `ESP_ERR_WIFI_STOP_STATE` 12308). `initWebServer()`/`stopWebServer()` log free heap + largest free block for diagnosing fragmentation.
+- **WAV metadata editing (canonical LIST INFO chunk):** the chunk layout, the fast/slow path split, and the measured rewrite throughput are in [docs/technical-reference.md § 4.5](docs/technical-reference.md#45-wav-metadata-editing). Code-level notes: the fast path is `writeWavMeta()` in web.cpp, which opens `"r+"` and overwrites the two 64-byte fields located by `findCanonicalListInfo`. The slow path streams a rewrite to `<path>.tmp` through a 256 KB PSRAM buffer (fallback: the static 4 KB `wavScanBuf`), dropping any existing front LIST INFO, inserting the canonical chunk, and patching the RIFF size from bytes actually written — then `SD.remove` + `SD.rename`. **The original is never destroyed before a complete rewrite**, and `.tmp` leftovers from an interrupted one are hidden from the listings and replaced on the next attempt. All three listing endpoints (`/api/files`, `/api/images`, `/api/music`) also hide dotfiles — any basename starting with `.` (e.g. macOS `._` resource forks, `.DS_Store`) via `isHiddenName()`. Progress is drawn by `drawWebWriteProgress`. The playback fallback chain (tags.json → WAV LIST INFO → filename) is unchanged.
 - **Bluetooth A2DP sink (`bluetooth.cpp`):** wraps `pschatzmann/ESP32-A2DP`. Menu CLICK on "Bluetooth" → `initBluetoothMode(nfc)` releases the legacy I2S driver, configures the same MAX98357A pins, registers AVRCP / connection / audio-state / stream callbacks, and calls `a2dp_sink.start(btDeviceName())` (advertised name `TinyJuke-XXXX` — base prefix + last 4 hex of the BT MAC, built from efuse so it's valid on the pairing screen before the stack starts). `handleBluetoothLoop()` runs every iteration on the BT screen: syncs `volumeLevel` into the A2DP stack via `set_volume`, resets the activity timer while streaming, checks `sleepTimerShouldFire(...)` (one-shot — clears `sleepTimerMinutes` and saves), and polls PN532 at ~300 ms cadence. Tag detection raises a modal prompt screen — click exits GUI (main loop's NFC poll picks up the still-present tag and triggers playback); hold dismisses; tag lift auto-dismisses. AVRCP `title`/`artist` are filtered through a printable-ASCII check (0x20..0x7E only) — anything outside falls back to "Bluetooth" to avoid encoding garbage on the 7-bit font. BT and WiFi (web server) are mutually exclusive in the menu UI.
 - **UI animation (`anim.h` + `guiAnimTick()`):** motion is only used where it carries information. All interpolation math is pure and host-tested in `anim.h`; the drivers live in `gui.cpp` (menu/volume/brightness) and `audio.cpp` (playback overlay). Three rules the implementation depends on:
   1. **The true value is applied immediately; only its on-screen representation is interpolated.** `volumeLevel`, `brightnessLevel` + `applyBrightness()`, and `menuSel` all update on the encoder event — nothing ever waits on an animation. Percentages and labels are painted from the true value (`updateVolumeText` / `updateBrightnessText`); only the bar fills are animated (`updateVolumeBars` / `updateBrightnessBar`), which is why those pairs are split.

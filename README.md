@@ -1,214 +1,279 @@
 # TinyJuke
 
-An RFID-driven jukebox built around an ESP32. Scan an NFC tag to play the linked track. Tag stickers are embedded in 3D-printed objects themed around the music they trigger.
+A little music box you control with physical objects. Put a tagged object on top
+and its song plays. Lift it off and the music stops. Swap it for another and the
+next song starts.
 
-## Hardware
+Each song is linked to an NFC tag sticker, and the stickers get embedded in
+3D-printed objects themed around the music they trigger. There are no menus to
+browse and nothing to read, which is the point — it works for someone who can't
+read yet.
 
-| Part              | Model                            | Notes                                |
-|-------------------|----------------------------------|--------------------------------------|
-| Microcontroller   | Lolin D32 Pro (ESP32)            | Onboard microSD (TF) card slot       |
-| NFC reader        | Elechouse PN532 (red board)      | Configured in HSU/UART mode          |
-| Audio amplifier   | MAX98357A (I²S class-D)          | Mono                                 |
-| Speaker           | 4 Ω, 3 W, mono                   | Driven directly from MAX98357A       |
-| Storage           | microSD card (FAT32)             | In the D32 Pro's onboard slot        |
-| Display           | 2.0" TFT, 240×320                | ST7789V driver, SPI                  |
+TinyJuke is an ESP32 project. It runs on a custom mainboard designed for it, but
+any ESP32-WROVER board will do. You'll need to build the hardware and flash the
+firmware yourself.
 
-## Wiring
+---
 
-### microSD card (onboard, SPI)
+## What it does
 
-| SD pin   | ESP32 GPIO |
-|----------|------------|
-| SD_MISO  | 19         |
-| SD_MOSI  | 23         |
-| SD_SCK   | 18         |
-| SD_CS    | 4          |
+- **Tag on, music plays.** Tag off, music stops. Same tag left on repeats the
+  track.
+- **A single knob** for everything: rotate for volume, click to confirm, hold to
+  open the menu.
+- **A 2" screen** showing album art, title, and artist.
+- **Bluetooth speaker mode**, so grown-ups can play their own music through it.
+- **A web app for setup.** The device hosts its own WiFi network — connect a
+  phone or laptop, upload music, and link it to tags. No app to install, no
+  account, no internet.
+- **Firmware updates over WiFi**, protected by a PIN shown on the device screen.
 
-### PN532 (HSU / UART mode)
+Everything lives on a microSD card. Nothing is uploaded anywhere.
 
-Set the PN532's DIP switches to HSU mode (SEL0 = 0, SEL1 = 0). Note that TX on one side connects to RX on the other.
+---
 
-| PN532 pin | ESP32 GPIO     |
-|-----------|----------------|
-| TX        | 22 (ESP32 RX)  |
-| RX        | 13 (ESP32 TX)  |
-| VCC       | 3V3            |
-| GND       | GND            |
+## What you need
 
-### MAX98357A (I²S)
+| Part        | What to get                                        |
+|-------------|----------------------------------------------------|
+| Mainboard   | The TinyJuke PCB — ESP32-WROVER-E N8R8 (8 MB flash, 8 MB PSRAM) |
+| NFC reader  | Elechouse PN532 (red board)                        |
+| Speaker     | 4 Ω, 3 W, mono                                     |
+| Display     | 2.0" ST7789V TFT, 240×320                          |
+| Knob        | KY-040 rotary encoder                              |
+| Storage     | microSD card, formatted FAT32                      |
+| Tags        | NTAG213/215/216 stickers, or any ISO14443A card    |
+| Amplifier   | MAX98357A I²S board — **only for a dev-board build** |
 
-| MAX98357A pin | ESP32 GPIO |
-|---------------|------------|
-| BCLK          | 21         |
-| LRC           | 26         |
-| DIN           | 25         |
-| Vin           | 5V (VUSB)  |
-| GND           | GND        |
+The mainboard is a custom PCB built around the ESP32-WROVER-E N8R8 module, and
+it's what the firmware builds for by default. **The MAX98357A amplifier is
+already on it**, so you only need to buy one if you're building on a dev board.
 
-### TFT display (SPI, on-board TFT port)
+**Any other ESP32-WROVER board works just as well** — the Lolin D32 Pro is fully
+supported and has its own build environment, and the project was developed on one
+before the PCB existed. Going that route, you'll wire up a separate MAX98357A
+breakout.
 
-The ST7789V display connects via the D32 Pro's on-board 10-pin SH 1.0 TFT port. It shares the VSPI bus with the onboard microSD card. Both use Arduino's bare-metal SPI (same `_spi_bus_array`), separated by their CS pins.
+> **Get a module with PSRAM.** WROVER modules have it; the otherwise similar
+> WROOM-32 does not. Album art is decoded and scaled in PSRAM, and without it
+> there isn't enough room in regular RAM to hold a cover image — the firmware
+> still runs and plays music, it just skips the artwork. If you're picking a
+> board, that's the spec that matters.
 
-| TFT pin | ESP32 GPIO | Notes                         |
-|---------|------------|-------------------------------|
-| SDA     | 23         | MOSI, shared with SD_MOSI     |
-| SCL     | 18         | SCK, shared with SD_SCK       |
-| CS      | 14         |                               |
-| DC      | 27         | Data/Command                  |
-| RST     | 33         |                               |
-| BLK     | 32         | Backlight                     |
-| VDD     | 3.3V       |                               |
-| GND     | GND        |                               |
+Plus a soldering iron and some wire if you're building on a dev board rather
+than the PCB. Wiring diagrams for both pin maps are in the
+[Technical Reference](docs/technical-reference.md#1-hardware).
 
-The SD card MISO line (GPIO 19) is not connected to the display, since the ST7789V does not output data.
+---
 
-### Rotary encoder (KY-040)
+## Getting started
 
-Used for volume adjustment and menu navigation.
+**1. Wire it up.** On the TinyJuke PCB the wiring is already done — plug in the
+display, reader, encoder, and speaker. Set the PN532's DIP switches to HSU mode
+and you're ready to flash.
 
-| KY-040 pin | ESP32 GPIO | Notes                      |
-|------------|------------|----------------------------|
-| CLK (A)    | 36         | Rotation pulse             |
-| DT  (B)    | 5          | Direction                  |
-| SW         | 34         | Push button (input-only)   |
-| +          | 3.3V       |                            |
-| GND        | GND        |                            |
+On a dev board, follow the [wiring tables](docs/technical-reference.md#14-wiring)
+and add the MAX98357A breakout. Besides the PN532's HSU switches, the detail
+that's easiest to get wrong is the amplifier's GAIN pin: tie it to GND rather
+than leaving it floating.
 
-The KY-040 module has built-in 10k pull-up resistors. GPIO 34 and 36 are input-only on the ESP32, but this works because the module handles the pull-up.
+**2. Flash the firmware.** Install [PlatformIO](https://platformio.org/), then
+pick the environment for your board:
 
-**Encoder controls:**
-- **Rotate** to adjust volume (jukebox mode) or navigate menus (management mode)
-- **Click** (short press) to save volume (jukebox) or select/confirm (menu)
-- **Hold** (long press, >600ms) to enter the management menu (jukebox) or go back (menu)
+```bash
+# TinyJuke PCB (ESP32-WROVER-E N8R8) — the default, so no -e needed:
+~/.platformio/penv/bin/pio run -t upload
 
-While you hold the encoder, a progress line grows along the bottom edge of the screen: it appears after about 200ms and reaches full width the instant the hold registers, so you can see how much longer to keep pressing. Let go early and it disappears without doing anything. The menu highlight also glides between entries as you rotate, and the volume and brightness bars ease toward their new level (the percentage itself updates immediately, and the actual volume and backlight change the moment you turn — only the bar is animated).
+# Lolin D32 Pro — check which flash variant you have first:
+esptool.py flash_id
+~/.platformio/penv/bin/pio run -e lolin_d32_pro     -t upload   # 16 MB board
+~/.platformio/penv/bin/pio run -e lolin_d32_pro-4mb -t upload   # 4 MB board
+```
 
-The menu provides access to Web Management, Bluetooth Mode, Volume, Brightness, Color Theme, Power Saving, Sleep Timer, Version (firmware version, build mode, and a QR code you can scan with a phone to open the project's latest GitHub release), and Reboot. Reboot shows a confirmation screen: hold the encoder to reboot, click or rotate to cancel. The Volume screen has two parameters, Volume and Max Volume. In jukebox mode Max Volume is a scale factor: the volume bar keeps its full 0-100% range and the actual loudness is volume × max volume (so 80% volume at 50% max gives 40%). In Bluetooth mode it acts as a hard cap on the volume, including the phone's volume slider. Rotate to adjust the highlighted parameter, click to switch between them, hold to save both (`/volume.cfg`, `/maxvolume.cfg`). Brightness uses a theme-accent bar with the same layout as volume and is persisted to `/brightness.cfg`. Color Theme recolors the entire UI: rotate to cycle through a set of dark palettes (Bamboo Moss, Deep Ocean, Slate, Iris Violet, Gilded Amber, Sunset Orange) with instant live preview, click or hold to save (`/theme.cfg`); the default is Bamboo Moss. Power Saving turns off the display after a configurable idle period (Off / 5 / 15 / 30 / 60 minutes; the 1-minute option only appears in `DEV_MODE` builds) and is persisted to `/powersave.cfg`. Sleep Timer stops audio playback after the configured duration (Off / 15 / 30 / 60 / 120 minutes; the 1-minute option only appears in `DEV_MODE` builds) and is persisted to `/sleeptimer.cfg`.
+The two boards use **different pin assignments** — the environment you pick
+selects the right one, so there's nothing to edit. The full list of
+environments, including a no-PSRAM build for a plain Lolin D32, is in the
+[build profiles](docs/technical-reference.md#32-build-profiles). For any other
+WROVER board, start from whichever pin map is closer to how you've wired it.
 
-MAX98357A configuration pins:
-- **GAIN**: tie to GND for 12 dB and control volume in software. Leaving the pin floating is unreliable (it is a high-impedance input, so noise can produce random gain at power-up).
-- **SD / Mode**: leave floating for an (L+R)/2 mono mix, or tie to GND for left-channel only.
+> The Lolin D32 Pro ships in 4 MB and 16 MB versions with **identical
+> markings**. Using the wrong environment boot-loops the device. When in doubt,
+> run `esptool.py flash_id`.
 
-## How it works
+**3. Prepare the SD card.** Format it FAT32 and insert it. That's enough — the
+device creates the folders it needs on first boot, and you'll add music through
+the web app in a moment.
 
-Each NFC tag UID maps to a single audio file on the SD card. When a tag is scanned:
+**4. Power it on.** You should see the waiting screen. If the screen reports an
+SD error or the device hangs on the NFC reader, check
+[troubleshooting](docs/technical-reference.md#5-troubleshooting).
 
-1. Any current playback stops immediately
-2. The file mapped to the scanned UID begins playback from the start
-3. The track loops as long as the same tag stays on the reader
-4. Replacing the tag with a different known tag during playback switches to the new track (hot-swap)
-5. Removing the tag stops playback
-6. Rotate the encoder to adjust volume (overlay bar appears, auto-saves after 5 seconds of inactivity)
-7. When idle on the waiting screen, the display turns off after the configured Power Saving timeout (default 15 min). Twist/press the encoder or scan a tag to wake.
-8. If a Sleep Timer is configured, an on-screen countdown is shown during playback and audio stops when the timer reaches zero (the tag must be removed/replaced before a new track will play).
+---
 
-Unknown tags are displayed on screen for 10 seconds with their UID. Click or hold the encoder to dismiss, or remove/replace the tag.
+## Using it
+
+### Playing music
+
+Put a tagged object on the reader. Whatever track is linked to that tag starts
+from the beginning, with its album art on screen.
+
+- Leave the tag on and the track repeats.
+- Swap in a different tag and it switches immediately.
+- Lift the tag off and playback stops.
+
+### The knob
+
+| Gesture | While playing / waiting     | In a menu                 |
+|---------|-----------------------------|---------------------------|
+| Hold    | Open the menu               | Go back                   |
+| Rotate  | Volume                      | Move between items        |
+| Click   | Save volume                 | Select / confirm          |
+
+Hold is about 0.6 seconds. While you hold, a line grows along the bottom edge of
+the screen — it appears after a moment and reaches full width exactly when the
+hold registers, so you can see how much longer to keep pressing. Let go early
+and nothing happens.
+
+The menu selection glides between entries as you turn, and the volume and
+brightness bars ease toward their new level. The actual volume and backlight
+change the instant you turn the knob; only the bar is animated.
+
+### The menu
+
+Hold the knob from the waiting screen to open it.
+
+| Item               | What it does                                                            |
+|--------------------|-------------------------------------------------------------------------|
+| **Web Management** | Starts the WiFi network and web app for adding music and tags, or updating firmware|
+| **Bluetooth Mode** | Turns the device into a Bluetooth speaker                               |
+| **Volume**         | Volume and Max Volume (see below)                                       |
+| **Brightness**     | Screen backlight                                                        |
+| **Color Theme**    | Select different color theme                                            |
+| **Power Saving**   | Turn the screen off after idling — Off / 5 / 15 / 30 / 60 min           |
+| **Sleep Timer**    | Stop the music after a while — Off / 15 / 30 / 60 / 120 min             |
+| **Version**        | Firmware version, plus a QR code linking to the latest release          |
+| **Reboot**         | Restarts the device (hold to confirm, click or rotate to cancel)        |
+
+Web Management and Bluetooth Mode can't run at the same time, so choosing one
+disables the other.
+
+**Volume vs. Max Volume.** The Volume screen has two settings; click to switch
+between them, hold to save both. Max Volume is the ceiling you set once so the
+box can't get too loud — in normal playback the volume knob keeps its full 0–100%
+range and the real loudness is volume × max volume (80% volume at 50% max gives
+40%). In Bluetooth mode it's a hard cap instead, and it also limits what the
+phone's own volume slider can do.
+
+**Power Saving** only blanks the screen; the device stays awake and a tag or a
+touch of the knob brings it back.
+
+**Sleep Timer** shows a countdown on screen while music plays and stops the audio
+when it reaches zero. Lift the tag and put it back to start playing again.
+
+---
 
 ## Bluetooth speaker mode
 
-Hold the encoder to enter the menu and select **Bluetooth**. The ESP32 starts an A2DP sink and advertises itself as `TinyJuke-XXXX` (unique per device — the base name plus the last 4 hex digits of the MAC). Pair from a phone and play music from any app. While in BT mode:
+Open the menu and pick **Bluetooth Mode**. The device advertises itself as
+`TinyJuke-XXXX` (the last four characters are unique to your device). Pair from a
+phone and play from any app.
 
-- **Rotate** the encoder to adjust volume (saved to `/volume.cfg`)
-- **Hold** the encoder to stop Bluetooth and return to the menu
-- **Tap an RFID tag** and a prompt appears asking to switch to jukebox mode. Click the encoder to switch, hold to dismiss, or lift the tag to cancel.
-- AVRCP track title/artist are displayed when the phone reports them in printable ASCII; otherwise the screen falls back to "Bluetooth".
-- The configured **Sleep Timer** stops audio and exits BT mode when it fires (same one-shot semantics as WAV playback).
-- The **Power Saving** screen blank applies while the phone is paused; the display wakes on the next audio frame or encoder event.
+While connected:
 
-Bluetooth and the Web Server cannot run at the same time, so the menu items are mutually exclusive.
+- **Rotate** to change volume — it stays in sync with the phone's slider.
+- **Hold** to leave Bluetooth and go back to the menu.
+- **Tap a tag** on the reader and you'll be asked whether to switch back to
+  jukebox mode. Click to switch, hold to dismiss, or just lift the tag.
+- Track title and artist appear on screen when the phone sends them.
+- The Sleep Timer works here too.
 
-## Web server & tag management
+---
 
-Hold the encoder button (>600ms) to enter the management menu, then select "Web Server" to start a WiFi access point. Connect a phone or laptop to the **TinyJuke-Setup** network (password: `12345678`) and open `http://192.168.4.1` in a browser.
+## Adding your own music
 
-The web interface provides:
-- **Tag grid**: browse all registered tags with album art, title, and artist
-- **Add / Edit / Remove tags**: link any NFC tag UID to a WAV file on the SD card with optional metadata. In the Add Tag dialog you can type the UID by hand or fill it automatically by tapping the tag on the device's reader (`GET /api/scan`, polled while the dialog is open; the last tag scanned wins, and a scanned or typed UID that is already registered shows a warning and disables saving)
-- **Audio upload**: upload WAV/MP3/M4A/AAC/OGG/FLAC. Non-WAV files are decoded and resampled in the browser to 44.1 kHz 16-bit mono WAV, then uploaded to `/music/` (`POST /upload`). The progress bar shows the decode → resample → encode → upload stages.
-- **Embedded album art**: when an uploaded MP3 / M4A / FLAC carries embedded cover art (ID3v2 APIC, MP4 `covr`, or FLAC PICTURE block), it is auto-extracted, centre-cropped, scaled to 300×300, written as 24-bit BMP, and uploaded to `/img/` alongside the audio. The resulting `.bmp` shares the audio file's basename so it can be picked in the tag editor.
-- **Image upload**: manually upload BMP/JPG/PNG album art to `/img/` (`POST /upload-img`)
-- **Album art picker**: choose any image in `/img/` when editing a tag (served via `GET /img?name=...`)
-- **Music management**: the Music tab lists every file in `/music/` with size, duration, and embedded title/artist (`GET /api/music`). Edit metadata (written into the WAV's LIST INFO chunk via `POST /api/file/meta`) or delete a file (`DELETE /api/file?name=...`). Deleting also removes any tags that reference it, after a confirmation listing them. Files uploaded through the web UI carry a fixed-size LIST INFO chunk so metadata edits are instant; older files are rewritten once on first edit, which can take tens of seconds for long tracks.
-- **Firmware update (OTA)**: the System tab shows the running firmware version and accepts a `.bin` image (`POST /update`), protected by a 4-digit PIN displayed on the device's web server screen (so joining the WiFi alone is not enough to flash the device). The image is written to the inactive OTA slot with progress on the device screen, and on success the device reboots into the new firmware. Build the image with `pio run` and find it at `.pio/build/lolin_d32_pro/firmware.bin`. Note that after switching to the OTA partition table (v1.6.0), the first flash must be done over USB, and there is no automatic rollback if an update misbehaves.
+Open the menu and pick **Web Management**. The screen shows the network name and
+a PIN. On your phone or laptop:
 
-Changes are written to `/tags.json` on the SD card immediately.
+1. Join the **TinyJuke-Setup** WiFi network (password `12345678`).
+2. Open **http://192.168.4.1** in a browser.
 
-## SD card layout
+You'll get a three-tab web app.
 
-```
-/
-├── img/                          # Album art (BMP, 24-bit, auto-scaled to 240×240)
-│   └── album1.bmp
-├── music/                        # WAV audio files
-│   ├── sample-12s.wav
-│   └── gc_22k.wav
-├── tags.json                     # UID → file + metadata mapping
-├── volume.cfg                    # Persisted volume level (plain text, 0-100)
-├── maxvolume.cfg                 # Persisted max-volume ceiling (plain text, 0-100)
-├── brightness.cfg                # Persisted brightness level (plain text, 0-100)
-├── powersave.cfg                  # Persisted power save timeout (plain text, minutes)
-├── sleeptimer.cfg                # Persisted audio sleep timer (plain text, minutes)
-└── theme.cfg                     # Persisted UI color-theme index (plain text)
-```
+**Tags** — the tag library. Add a tag, and while the dialog is open you can just
+tap the sticker on the device's reader to fill in its ID automatically. Pick a
+track, optionally set a title, artist, and album art, and save. If you tap a
+sticker that's already registered, it tells you instead of letting you create a
+duplicate.
 
-`tags.json` maps each tag UID to a music file. Optional fields provide album art and metadata:
+**Music** — everything on the card, with size, duration, and embedded metadata.
 
-```json
-{
-  "81:0C:2B:07": {
-    "file": "music/sample-12s.wav",
-    "img": "album1.bmp",
-    "title": "My Song",
-    "artist": "Artist Name",
-    "album": "Album Title"
-  },
-  "52:F4:13:07": { "file": "music/gc_22k.wav" }
-}
-```
+- **Upload** WAV, MP3, M4A, AAC, OGG, or FLAC. Anything that isn't already a WAV
+  gets converted in your browser before it uploads, so the device only ever
+  receives WAV.
+- **Cover art comes along for the ride.** If an MP3, M4A, or FLAC has embedded
+  artwork, it's cropped, resized, and uploaded automatically, ready to pick in the
+  tag editor.
+- **Edit titles and artists** directly. For files uploaded through this app the
+  change is instant. For files you copied onto the card by hand, the first edit
+  rewrites the file and can take up to a minute for a long track — the device
+  shows a progress bar.
+- **Delete** a track, and any tags pointing at it are removed too (you'll see the
+  list before confirming).
 
-All fields except `file` are optional. `img` paths are relative to `/img/` on the SD card. Metadata priority: tags.json fields → WAV LIST INFO metadata → filename without `.wav`.
+**System** — the running firmware version, and firmware updates. Pick a `.bin`
+file, enter the PIN shown on the device screen, and the device flashes itself and
+reboots. The PIN exists so that being on the WiFi isn't by itself enough to
+reflash the box.
 
-## Building & flashing
+> Two caveats on updates: the very first flash after upgrading from firmware
+> older than v1.6.0 has to be done over USB, and there's no automatic rollback —
+> an update that boots but misbehaves needs a USB reflash.
 
-**Toolchain:** PlatformIO with Arduino framework on ESP32.
+You can also just copy files onto the SD card from a computer. Put audio in
+`/music/`, artwork in `/img/`, and the device picks them up on the next boot.
 
-**Libraries:**
-- PN532 + PN532_HSU for the NFC reader (bundled in `lib/`, from `https://github.com/elechouse/PN532`)
-- `ArduinoJson` (bblanchon) for parsing `tags.json`
-- `Arduino_GFX` (moononournation) for the TFT display driver (ST7789)
-- `ESP32-A2DP` (pschatzmann) for the Bluetooth A2DP sink (BT speaker mode), built with `-DA2DP_LEGACY_I2S_SUPPORT=1` so it shares the legacy I2S driver path we use for WAV playback
-- WAV audio uses the ESP32's built-in I2S driver (no extra library needed)
-- SD (built-in, Arduino ESP32 framework) for SD card access via SPI
-- WiFi + WebServer (built-in, Arduino ESP32 framework) for AP mode and the REST API
+---
 
-**Platform:** PlatformIO `espressif32` 7.x (via pioarduino), shipping arduino-esp32 3.x. The 3.x core is required for `ledcAttach` and the 3.x `i2s_config_t` field names.
+## Something's wrong
 
-**Pins** are defined in `src/config.h`. The code is split into modules under `src/`: `config.h`, `audio.cpp`, `wav_parser.cpp`, `screen.cpp`, `tags.cpp`, `tag_utils.cpp`, `encoder.cpp`, `encoder_gray.h`, `value_array.h`, `gui.cpp`, `web.cpp`, `bluetooth.cpp`, `main.cpp`.
+Common problems and what to check are in the
+[troubleshooting table](docs/technical-reference.md#5-troubleshooting). For boot
+diagnostics, connect over USB and run
+`~/.platformio/penv/bin/pio device monitor` at 115200 baud.
 
-**Flash steps:**
-1. Format SD card as FAT32, copy `music/`, `img/` (optional), and `tags.json` to the root. `music/` and `img/` are created automatically on first boot if they don't exist, so a blank card also works.
-2. Run `~/.platformio/penv/bin/pio run -t upload` to build and flash over USB. The D32 Pro ships in 4 MB and 16 MB flash variants with identical markings (check with `esptool.py flash_id`). Use `-e lolin_d32_pro-4mb` for a 4 MB board, since the default 16 MB partition table boot-loops on a 4 MB chip. For the custom WROVER-E PCB, build with `-e wrover_e`.
-3. Run `~/.platformio/penv/bin/pio device monitor` to see boot diagnostics and scanned UIDs at 115200 baud
+---
 
-**Tests:** Pure logic (WAV header/metadata parsing, UID formatting, tag lookup, encoder gray-code, value-array helpers) has host-side Unity tests. Run them with `~/.platformio/penv/bin/pio test -e native`; no board required.
+## Documentation
 
-## Troubleshooting
+Browse it online at **[qxzzxq.github.io/TinyJuke](https://qxzzxq.github.io/TinyJuke/)**,
+or read the Markdown here:
 
-- **SD card not detected**: confirm FAT32 (not exFAT), re-seat the card, and check the CS pin (GPIO 4). If SD init is unreliable, try a different CS pin.
-- **PN532 not responding**: verify the HSU mode DIP switch setting, confirm TX↔RX are crossed (PN532 TX → ESP32 RX), and check 3V3 power.
-- **Weak NFC read range**: keep the antenna away from metal and from the speaker magnet. Target ≤ 2 cm through the enclosure wall (1.2 to 1.6 mm PLA is fine).
-- **Audio distortion / clipping**: reduce software volume first. If it is still distorted, check that your WAV files are normalized to a consistent loudness.
-- **Audio whine synced with activity**: usually a power or ground routing issue. Add bulk capacitance on the MAX98357A Vin and keep audio ground separate from the SD/NFC digital ground where possible.
+| Document | What's in it |
+|---|---|
+| [docs/technical-reference.md](docs/technical-reference.md) | Wiring, pin maps, SD card format, build profiles, HTTP API, troubleshooting |
+| [docs/esp32_wrover_e_pin_map.md](docs/esp32_wrover_e_pin_map.md) | Pin allocation for the custom WROVER-E mainboard |
+| [CLAUDE.md](CLAUDE.md) | Firmware architecture, design decisions, and contributor workflow |
+| [TinyJuke_mainboard_v2_1-P1_2026-06-11.png](docs/TinyJuke_mainboard_v2_1-P1_2026-06-11.png) | Schematic of the TinyJuke PCB |
+
+---
 
 ## Status
 
-Milestone 4 in progress. Added: Bluetooth A2DP sink (speaker) mode with AVRCP metadata display, encoder volume control, sleep-timer + power-save integration, an RFID tag-detected prompt that hands off to jukebox playback, web-based music management (list / edit WAV metadata / delete with tag cascade), OTA firmware updates from the web UI (16 MB partition table with dual app slots), and a max-volume setting configurable from the Volume screen (loudness scale factor in jukebox mode, hard cap in Bluetooth mode).
+**Milestone 4, in progress.** Working today: tag-triggered playback with hot-swap,
+album art, the encoder GUI with themes and timers, the web app for tags and music,
+Bluetooth speaker mode, and over-the-air firmware updates.
 
-Prior milestones: web-based tag management, WAV + image upload, browser-side MP3/M4A/AAC/OGG/FLAC → WAV conversion with embedded-art extraction, runtime volume control, encoder-driven GUI with Brightness / Color Theme / Power Saving / Sleep Timer / Version screens, BMP album art (240×240, scaled in PSRAM), tag hot-swap detection, and amp-touch-noise mitigation via I2S priming.
+Recent additions include web-based music management (edit metadata, delete with
+tag cascade), OTA updates from the System tab, and a max-volume ceiling.
+
+---
 
 ## License
 
-This is an open-hardware project, so the code, the hardware design, and the documentation are licensed separately. All three licenses are copyleft: you can use, modify, and redistribute the project, but anything you build from it has to stay open under the same license.
+This is an open-hardware project, so the code, the hardware design, and the
+documentation are licensed separately. All three are copyleft: you can use,
+modify, and redistribute the project, but anything you build from it has to stay
+open under the same license.
 
 | Part | Covers | License |
 |------|--------|---------|
@@ -218,12 +283,14 @@ This is an open-hardware project, so the code, the hardware design, and the docu
 
 Copyright © 2026 qxzzxq.
 
-Third-party components have their own licenses and are not covered by the above:
+Third-party components keep their own licenses and are not covered by the above:
 
 - PN532 NFC library (`lib/PN532*`): BSD 3-Clause (Adafruit / Seeed), see `lib/PN532/license.txt`
 - Arduino_GFX: BSD (Adafruit-derived)
 - ArduinoJson: MIT
 - ESP32-A2DP: Apache-2.0
+- QRCode (ricmoo): MIT
 - arduino-esp32 core (SD, WiFi, WebServer, SPI, I2S): LGPL-2.1
 
-These are all GPL-compatible, so the firmware as a whole can ship under GPL-3.0-or-later.
+These are all GPL-compatible, so the firmware as a whole ships under
+GPL-3.0-or-later.
