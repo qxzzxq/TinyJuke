@@ -1,0 +1,54 @@
+name: Publish docs site
+
+# Renders README.md and docs/*.md into a static site and publishes it to
+# GitHub Pages. The Markdown stays the source of truth — no HTML is committed.
+# Requires Settings → Pages → Source = "GitHub Actions" (one-time setup).
+on:
+  push:
+    branches: [main]
+    paths:
+      - README.md
+      - docs/**
+      - tools/build_docs.py
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a running deploy finish rather than cancelling it mid-publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install markdown
+
+      - name: Build site
+        run: python tools/build_docs.py
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
