@@ -181,6 +181,17 @@ static void runPlayback(const uint8_t *uid, uint8_t uidLength) {
     while (millis() - t < 10000) {
       int eu = readEncoder();
       if (eu == ENC_CLICK || eu == ENC_HOLD) break;
+
+      // This screen's hint is "hold to dismiss", so the gesture needs the same
+      // progress indicator as everywhere else. Skip the blocking NFC read for
+      // the duration of a press so the loop runs fast enough to animate it —
+      // safe here because the 10 s timeout still bounds the screen, and the
+      // user is pressing to dismiss rather than swapping tags.
+      int hp = holdProgressPct(encHoldMs(), HOLD_HINT_DELAY_MS, ENC_HOLD_MS);
+      if (hp >= 0) drawHoldProgress(hp);
+      else         clearHoldProgress();
+      if (encPressActive()) continue;
+
       uint8_t u[10]; uint8_t uLen = 0;
       if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, u, &uLen, 200)) {
         // Same debounce as everywhere else: one missed read while the tag

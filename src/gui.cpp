@@ -483,7 +483,9 @@ void guiLoop() {
         if (ev == ENC_NONE) break;
       }
 
-      if (powerSaveMinutes != oldMinutes)
+      // Only paint if we're still on this screen: a click can be drained in
+      // the same burst as a rotation, which already switched us to the menu.
+      if (powerSaveMinutes != oldMinutes && scr == Screen::POWERSAVING)
         updatePowerSaveDisplay(powerSaveMinutes);
       break;
     }
@@ -519,7 +521,8 @@ void guiLoop() {
         if (ev == ENC_NONE) break;
       }
 
-      if (sleepTimerMinutes != oldMinutes)
+      // Same current-screen guard as the other settings screens.
+      if (sleepTimerMinutes != oldMinutes && scr == Screen::SLEEPTIMER)
         updateSleepTimerDisplay(sleepTimerMinutes);
       break;
     }
@@ -551,7 +554,7 @@ void guiLoop() {
       break;
 
     // ================ BLUETOOTH ================
-    // Rotation adjusts volume live; CLICK = no-op; HOLD = exit (handled above).
+    // Rotation adjusts volume live; CLICK saves; HOLD exits.
     case Screen::BLUETOOTH: {
       int oldLevel = volumeLevel;
       for (;;) {
@@ -561,11 +564,21 @@ void guiLoop() {
         } else if (ev == ENC_CLICK) {
           saveVolume();
           break;
+        } else if (ev == ENC_HOLD) {
+          // A hold reached inside this loop has already passed the global
+          // handler, so it must be honoured here or it is swallowed and the
+          // user has to release and hold again. Mirrors the other screens.
+          saveVolume();
+          stopBluetoothMode();
+          btRunning = false;
+          scr = Screen::MENU; menuSel = MI_BLUETOOTH;
+          redraw();
+          break;
         }
         ev = readEncoder();
         if (ev == ENC_NONE) break;
       }
-      if (volumeLevel != oldLevel) {
+      if (volumeLevel != oldLevel && scr == Screen::BLUETOOTH) {
         updateBluetoothVolume(volumeLevel);
         btVolDrawn = volumeLevel;
       }

@@ -139,7 +139,11 @@ void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t ta
   uint32_t remaining = hdr.dataSize;
   i2s_start(I2S_NUM_0);
 
-  uint32_t lastNfcCheck = 0;
+  // Stamp "now" rather than 0: at 0 the first poll fires after a single 2 KB
+  // write, when only ~11.6 ms of audio is queued instead of the ~185 ms the
+  // DMA ring holds once primed — a blocking read there underruns audibly at
+  // the start of every track. One full interval is ample to fill the ring.
+  uint32_t lastNfcCheck = millis();
   uint8_t  tagAbsentCount = 0;
   // Cleared until the tag is actually read during this playback; misses before
   // that mean "still being placed" rather than "removed".
