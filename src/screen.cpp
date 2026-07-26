@@ -8,6 +8,8 @@
 #include "timer_logic.h"
 #include "web.h"  // getWebPin() for the web server screen
 #include "storage.h"  // sdOpenRead()
+#include "qr_layout.h"
+#include <qrcode.h>
 #include <SD.h>
 #include <esp_heap_caps.h>
 
@@ -869,14 +871,69 @@ void updateSleepTimerDisplay(int minutes) {
 //  Version screen
 // ================================================================
 
+// QR version 4 = 33x33 modules, holding 62 bytes here — comfortably more than
+// the releases URL. 33 modules is also about the largest symbol that still
+// leaves usefully chunky pixels on a 240 px-wide screen.
+//
+// Two quirks of ricmoo/QRCode worth knowing before touching any of this:
+//
+//  - Its ECC_* constants do not line up with its own table order. ECC_LOW is 0,
+//    which indexes the row holding the *Medium* codeword counts, so we get
+//    Medium correction and Medium's 62-byte capacity. That is fine — stronger
+//    correction than we asked for — but it is why the number is 62 rather than
+//    the 78 a version-4 / ECC-L table would lead you to expect.
+//  - qrcode_initBytes() never checks the data length against that capacity
+//    before writing. Over-long input silently overruns the buffer instead of
+//    returning an error, so the static_assert below is the only thing standing
+//    between a longer URL and memory corruption. Do not weaken it, and do not
+//    rely on the initText() return value to catch an oversized string.
+static const uint8_t QR_VERSION  = 4;
+static const int     QR_MODULES  = 4 * QR_VERSION + 17;   // 33
+static const size_t  QR_CAPACITY = 62;
+
+// Fixed black-on-white, never themed — see the polarity note on drawQrCode().
+static const uint16_t QR_LIGHT = 0xFFFF;
+static const uint16_t QR_DARK  = 0x0000;
+
+static_assert(sizeof(RELEASE_URL) - 1 <= QR_CAPACITY,
+              "RELEASE_URL exceeds the QR capacity and would overflow the "
+              "encoder buffer at runtime — raise QR_VERSION, re-derive "
+              "QR_CAPACITY, and re-check the symbol still fits the screen");
+
+// Render a QR for `text` into the given box.
+//
+// Deliberately drawn as black modules on a white patch rather than in theme
+// colours: the format assumes dark-on-light, and enough scanners refuse an
+// inverted symbol that theming this would leave it looking correct but
+// unusable. Same reason the quiet zone is part of the white patch.
+static void drawQrCode(const char *text, int boxX, int boxY, int boxW, int boxH) {
+  QrPlacement p = qrPlace(QR_MODULES, boxX, boxY, boxW, boxH);
+  if (p.scale < 1) return;   // nothing sensible to draw in this space
+
+  QRCode qr;
+  uint8_t qrData[qrcode_getBufferSize(QR_VERSION)];
+  if (qrcode_initText(&qr, qrData, QR_VERSION, ECC_LOW, text) != 0) return;
+
+  gfx.fillRect(p.x, p.y, p.size, p.size, QR_LIGHT);
+
+  // Draw each row as horizontal runs of dark modules instead of one fillRect
+  // per module: a 33x33 symbol is ~1089 rects otherwise, and every one pays
+  // its own SPI transaction setup.
+  for (uint8_t my = 0; my < qr.size; my++) {
+    uint8_t mx = 0;
+    while (mx < qr.size) {
+      if (!qrcode_getModule(&qr, mx, my)) { mx++; continue; }
+      uint8_t run = 0;
+      while (mx + run < qr.size && qrcode_getModule(&qr, mx + run, my)) run++;
+      gfx.fillRect(p.originX + mx * p.scale, p.originY + my * p.scale,
+                   run * p.scale, p.scale, QR_DARK);
+      mx += run;
+    }
+  }
+}
+
 void drawVersionScreen() {
   drawHeader("Version", "back");
-
-  gfx.setTextColor(C_TEXT);
-  gfx.setTextSize(3);
-  int16_t w = textWidth(VERSION_STRING);
-  gfx.setCursor((gfx.width() - w) / 2, 100);
-  gfx.print(VERSION_STRING);
 
   const char *mode =
 #ifdef DEV_MODE
@@ -885,11 +942,12 @@ void drawVersionScreen() {
       "release";
 #endif
 
-  gfx.setTextColor(C_ACCENT);
-  gfx.setTextSize(3);
-  w = textWidth(mode);
-  gfx.setCursor((gfx.width() - w) / 2, 140);
-  gfx.print(mode);
+  centerText(VERSION_STRING, 44, C_TEXT, 3);
+  centerText(mode, 74, C_ACCENT, 2);
+
+  // Free band between the mode line and the caption.
+  drawQrCode(RELEASE_URL, 0, 96, gfx.width(), 168);
+  centerText("scan for latest release", 272, C_MUTED, 1);
 
   drawHintBar("click or hold to return");
 }

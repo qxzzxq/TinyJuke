@@ -115,7 +115,14 @@
 #endif
 
 // --- Version ---
-#define VERSION_STRING       "v1.10.0"
+#define VERSION_STRING       "v1.11.0"
+
+// Shown as a QR code on the Version screen. Points at /releases/latest rather
+// than a specific tag, so the code stays correct as new versions ship and the
+// device never has to be online to know what the newest release is.
+// Length is capped by the QR version chosen in screen.cpp — see the
+// static_assert there if this changes.
+#define RELEASE_URL          "https://github.com/qxzzxq/TinyJuke/releases/latest"
 
 // --- Menu ---
 #define MENU_ITEM_COUNT      9

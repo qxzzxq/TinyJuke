@@ -22,6 +22,8 @@
 #include "jukebox_state.cpp"
 #include "theme.h"
 #include "anim.h"
+#include "qr_layout.h"
+#include <qrcode.h>
 
 // ----------------------------------------------------------------
 //  uidToStr — colon-separated uppercase hex
@@ -1328,6 +1330,122 @@ void test_hold_progress_survives_degenerate_config() {
 }
 
 // ----------------------------------------------------------------
+//  QR code — placement maths and the encoder's real limits
+// ----------------------------------------------------------------
+
+// Mirrors the constants in screen.cpp.
+static const uint8_t TEST_QR_VERSION  = 4;
+static const int     TEST_QR_MODULES  = 33;
+static const size_t  TEST_QR_CAPACITY = 62;
+
+// NOTE: do not probe capacity by feeding the encoder ever-longer strings.
+// qrcode_initBytes() writes the codewords without ever checking them against
+// the symbol's capacity, so over-long input overruns the buffer and crashes
+// rather than returning an error. An earlier version of this test did exactly
+// that and segfaulted. Everything below stays at or under capacity.
+
+void test_qr_capacity_is_the_medium_ecc_figure() {
+  // A string exactly at capacity must encode cleanly. This pins the constant
+  // that screen.cpp's static_assert relies on — and that assert is the only
+  // guard against the overflow described above, so it has to be right.
+  //
+  // 62 (not 78) because the library's ECC_* constants are off by one against
+  // its own table: ECC_LOW indexes the Medium codeword counts, so we get
+  // Medium correction and Medium capacity.
+  QRCode qr;
+  uint8_t buf[qrcode_getBufferSize(TEST_QR_VERSION)];
+  char s[TEST_QR_CAPACITY + 1];
+  memset(s, 'a', TEST_QR_CAPACITY);
+  s[TEST_QR_CAPACITY] = '\0';
+
+  TEST_ASSERT_EQUAL_INT(0, qrcode_initText(&qr, buf, TEST_QR_VERSION, ECC_LOW, s));
+  TEST_ASSERT_EQUAL_INT(TEST_QR_MODULES, qr.size);
+}
+
+void test_release_url_fits_with_headroom() {
+  // The shipped URL must not sit right on the limit: at capacity, adding a
+  // character to the org or repo name would overflow rather than fail loudly.
+  const char *url = "https://github.com/qxzzxq/TinyJuke/releases/latest";
+  TEST_ASSERT_TRUE(strlen(url) < TEST_QR_CAPACITY);
+  TEST_ASSERT_TRUE(TEST_QR_CAPACITY - strlen(url) >= 8);   // room to rename
+
+  QRCode qr;
+  uint8_t buf[qrcode_getBufferSize(TEST_QR_VERSION)];
+  TEST_ASSERT_EQUAL_INT(0, qrcode_initText(&qr, buf, TEST_QR_VERSION, ECC_LOW, url));
+}
+
+void test_qr_symbol_size_matches_the_version_formula() {
+  // QR_MODULES in screen.cpp is computed as 4*version+17; the drawing code
+  // sizes the whole layout from it, so a mismatch would misplace every module.
+  QRCode qr;
+  uint8_t buf[qrcode_getBufferSize(TEST_QR_VERSION)];
+  TEST_ASSERT_EQUAL_INT(0, qrcode_initText(&qr, buf, TEST_QR_VERSION, ECC_LOW,
+                                           "https://example.com/releases/latest"));
+  TEST_ASSERT_EQUAL_INT(TEST_QR_MODULES, qr.size);
+  TEST_ASSERT_EQUAL_INT(TEST_QR_MODULES, 4 * TEST_QR_VERSION + 17);
+}
+
+void test_qr_has_finder_patterns_in_three_corners() {
+  // Structural sanity that we produced a real symbol rather than an empty or
+  // corrupted buffer: a finder is a solid 7x7 dark ring with a light gap.
+  QRCode qr;
+  uint8_t buf[qrcode_getBufferSize(TEST_QR_VERSION)];
+  TEST_ASSERT_EQUAL_INT(0, qrcode_initText(&qr, buf, TEST_QR_VERSION, ECC_LOW,
+                                           "https://example.com/releases/latest"));
+  const int last = TEST_QR_MODULES - 7;
+  const int corners[3][2] = {{0, 0}, {last, 0}, {0, last}};
+  for (int c = 0; c < 3; c++) {
+    int ox = corners[c][0], oy = corners[c][1];
+    for (int i = 0; i < 7; i++) {
+      TEST_ASSERT_TRUE(qrcode_getModule(&qr, ox + i, oy));         // top edge
+      TEST_ASSERT_TRUE(qrcode_getModule(&qr, ox + i, oy + 6));     // bottom edge
+      TEST_ASSERT_TRUE(qrcode_getModule(&qr, ox, oy + i));         // left edge
+      TEST_ASSERT_TRUE(qrcode_getModule(&qr, ox + 6, oy + i));     // right edge
+    }
+    TEST_ASSERT_FALSE(qrcode_getModule(&qr, ox + 1, oy + 1));      // light gap
+    TEST_ASSERT_TRUE(qrcode_getModule(&qr, ox + 3, oy + 3));       // dark core
+  }
+}
+
+void test_qr_place_centres_and_reserves_the_quiet_zone() {
+  // The quiet zone is not decoration — without it many scanners never lock on,
+  // so it must be inside the drawn (light) square, not borrowed from the
+  // surrounding dark UI.
+  QrPlacement p = qrPlace(33, 0, 96, 240, 168);
+  const int total = 33 + 2 * QR_QUIET_MODULES;      // 41
+
+  TEST_ASSERT_EQUAL_INT(168 / total, p.scale);      // 4 px per module
+  TEST_ASSERT_EQUAL_INT(total * p.scale, p.size);
+  TEST_ASSERT_EQUAL_INT((240 - p.size) / 2, p.x);   // centred horizontally
+  TEST_ASSERT_EQUAL_INT(96 + (168 - p.size) / 2, p.y);
+  // Modules start one quiet zone in on both axes.
+  TEST_ASSERT_EQUAL_INT(p.x + QR_QUIET_MODULES * p.scale, p.originX);
+  TEST_ASSERT_EQUAL_INT(p.y + QR_QUIET_MODULES * p.scale, p.originY);
+  // And the symbol plus both quiet zones stays inside the box.
+  TEST_ASSERT_TRUE(p.x >= 0 && p.x + p.size <= 240);
+  TEST_ASSERT_TRUE(p.y >= 96 && p.y + p.size <= 96 + 168);
+}
+
+void test_qr_place_uses_whole_pixel_modules() {
+  // A fractional scale would make some modules a pixel wider than others and
+  // smear the edges scanners measure against.
+  for (int box = 60; box <= 240; box += 7) {
+    QrPlacement p = qrPlace(33, 0, 0, box, box);
+    if (p.scale < 1) continue;
+    TEST_ASSERT_EQUAL_INT(p.size, p.scale * (33 + 2 * QR_QUIET_MODULES));
+    TEST_ASSERT_TRUE(p.size <= box);
+  }
+}
+
+void test_qr_place_reports_when_it_cannot_fit() {
+  // Too small to render legibly — the caller draws nothing rather than a
+  // scrambled half-symbol.
+  TEST_ASSERT_EQUAL_INT(0, qrPlace(33, 0, 0, 40, 40).scale);
+  TEST_ASSERT_EQUAL_INT(0, qrPlace(0,  0, 0, 240, 240).scale);
+  TEST_ASSERT_EQUAL_INT(0, qrPlace(-1, 0, 0, 240, 240).scale);
+}
+
+// ----------------------------------------------------------------
 //  Unity entry point
 // ----------------------------------------------------------------
 
@@ -1459,6 +1577,14 @@ int main() {
   RUN_TEST(test_hold_progress_is_linear_to_the_threshold);
   RUN_TEST(test_hold_progress_saturates_past_threshold);
   RUN_TEST(test_hold_progress_survives_degenerate_config);
+
+  RUN_TEST(test_qr_capacity_is_the_medium_ecc_figure);
+  RUN_TEST(test_release_url_fits_with_headroom);
+  RUN_TEST(test_qr_symbol_size_matches_the_version_formula);
+  RUN_TEST(test_qr_has_finder_patterns_in_three_corners);
+  RUN_TEST(test_qr_place_centres_and_reserves_the_quiet_zone);
+  RUN_TEST(test_qr_place_uses_whole_pixel_modules);
+  RUN_TEST(test_qr_place_reports_when_it_cannot_fit);
 
   return UNITY_END();
 }
