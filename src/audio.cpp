@@ -194,6 +194,7 @@ void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t ta
     // --- Encoder: volume adjustment during playback ---
     int enc = readEncoder();
     if ((enc > 0 && enc < ENC_CLICK) || (enc < 0)) {
+      int prevVolume = volumeLevel;
       int steps = (enc > 0) ? enc : -enc;
       int delta = (enc > 0) ? 1 : -1;
       while (steps-- > 0) {
@@ -202,13 +203,14 @@ void playWav(const char *filepath, PN532 &nfc, const uint8_t *tagUid, uint8_t ta
         volumeLevel = next;
       }
       uint32_t now = millis();
-      if (!volOverlayVisible) {
-        // First turn of this burst — draw the bar where it actually is.
-        drawPlaybackVolumeOverlay(volumeLevel);
-        animSettle(volBarAnim, volumeLevel, now);
-      } else {
-        animStart(volBarAnim, animValue(volBarAnim, now), volumeLevel, now, ANIM_BAR_MS);
-      }
+      // Reveal the hidden bar at the level it held *before* this turn, so the
+      // first adjustment eases like every later one. Revealing it already at
+      // the new level would leave the common single-adjustment case — and the
+      // big jump of a fast spin — with no animation at all.
+      int from = prevVolume;
+      if (volOverlayVisible) from = animValue(volBarAnim, now);
+      else                   drawPlaybackVolumeOverlay(prevVolume);
+      animStart(volBarAnim, from, volumeLevel, now, ANIM_BAR_MS);
       volOverlayTimer   = now;
       volOverlayVisible = true;
     }
