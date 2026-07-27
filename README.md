@@ -159,13 +159,16 @@ change the instant you turn the knob; only the bar is animated.
 
 ### The menu
 
-Hold the knob from the waiting screen to open it. Here is the whole menu, end to
-end:
+Hold the knob from the waiting screen to open it.
+[Here is the whole menu, end to end](docs/img/demo-menu.mp4) (MP4, 72 s).
 
+<!-- Inline player hidden: GitHub strips <video> with a relative src, so this
+     renders as nothing in the README. The link above works in both places.
 <video src="docs/img/demo-menu.mp4" controls muted playsinline preload="metadata" width="640">
 </video>
+-->
 
-*If the player doesn't appear, [watch the menu tour directly](docs/img/demo-menu.mp4) (MP4, 72 s).*
+
 
 | Item               | What it does                                                            |
 |--------------------|-------------------------------------------------------------------------|
