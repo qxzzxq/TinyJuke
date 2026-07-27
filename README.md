@@ -1,17 +1,19 @@
 # TinyJuke
 
-![Two TinyJuke boxes, a red one and a purple one, in white 3D-printed shells with perforated speaker grilles, a card slot, a small screen and a knob](docs/img/tinyjuke.jpg)
+![Two TinyJuke boxes, a red one and a purple one, in white 3D-printed shells with perforated speaker grilles, a disk slot, a small screen and a knob](docs/img/tinyjuke.jpg)
 
 Your little one plays the same song over and over? Regular speakers too fiddly for
 small hands? This little music box has you covered.
 
-Slide a card into the slot and its song plays. Pull it out and the music stops.
+Slide a disk into the slot and its song plays. Pull it out and the music stops.
 Swap it for another and the next song starts. That's the whole interface — a fun,
 intuitive way for kids to put on their own music.
 
-Each song is linked to an NFC sticker on a 3D-printed floppy disk (yes I am that old), themed
-around the music it triggers. There are no menus to browse and nothing to read,
-which is the point: it works for someone who can't read yet. Or even better, you can write the song name on the disk to teach them reading!
+Each song is linked to an NFC sticker on a 3D-printed floppy disk (yes, I am that
+old) — a real one shrunk to 75% — themed around the music it triggers. There are
+no menus to browse and nothing to read, which is the point: it works for someone
+who can't read yet. Or better still, write the song name on the disk and it
+starts teaching them to read!
 
 TinyJuke is an ESP32 project. It runs on a custom mainboard designed for it, but
 any ESP32-WROVER board will do. You'll need to build the hardware and flash the
@@ -21,11 +23,11 @@ firmware yourself.
 
 ## What it does
 
-![Inserting a card into the slot: the screen goes from "insert a tag" to album art, then the knob adjusts volume](docs/img/demo-insert.webp)
+![Inserting a disk into the slot: the screen goes from "insert a tag" to album art, then the knob adjusts volume](docs/img/demo-insert.webp)
 
 *(silent — [same clip with sound](docs/img/demo-insert.mp4))*
 
-- **Card in, music plays.** Card out, music stops. Leave it in and the track
+- **Disk in, music plays.** Disk out, music stops. Leave it in and the track
   repeats.
 - **A single knob** for everything: rotate for volume, click to confirm, hold to
   open the menu.
@@ -52,7 +54,7 @@ Everything lives on a microSD card. Nothing is uploaded anywhere.
 | Display     | 2.0" ST7789V TFT, 240×320                          |
 | Knob        | KY-040 rotary encoder                              |
 | Storage     | microSD card, formatted FAT32                      |
-| Tags        | NTAG213/215/216 stickers — one per card, or any ISO14443A card |
+| Tags        | NTAG213/215/216 stickers — one per disk, or any ISO14443A card |
 | Amplifier   | MAX98357A I²S board — **only for a dev-board build** |
 
 The mainboard is a custom PCB built around the ESP32-WROVER-E N8R8 module, and
@@ -128,15 +130,15 @@ SD error or the device hangs on the NFC reader, check
 
 ### Playing music
 
-<!-- ![Close-up of the front panel: perforated speaker grille and the narrow vertical card slot beside the screen](docs/img/tinyjuke-slot.jpg) -->
+<!-- ![Close-up of the front panel: perforated speaker grille and the narrow vertical disk slot beside the screen](docs/img/tinyjuke-slot.jpg) -->
 
-The idle screen says **insert a tag**. Slide a card into the slot on the front and
+The idle screen says **insert a tag**. Slide a disk into the slot on the front and
 whatever track is linked to it starts from the beginning, with its album art on
 screen.
 
-- Leave the card in and the track repeats.
-- Swap in a different card and it switches immediately.
-- Pull the card out and playback stops.
+- Leave the disk in and the track repeats.
+- Swap in a different disk and it switches immediately.
+- Pull the disk out and playback stops.
 
 ### The knob
 
@@ -193,10 +195,10 @@ range and the real loudness is volume × max volume (80% volume at 50% max gives
 phone's own volume slider can do.
 
 **Power Saving** only blanks the screen; the device stays awake, and inserting a
-card or touching the knob brings it back.
+disk or touching the knob brings it back.
 
 **Sleep Timer** shows a countdown on screen while music plays and stops the audio
-when it reaches zero. Pull the card out and put it back to start playing again.
+when it reaches zero. Pull the disk out and put it back to start playing again.
 
 ---
 
@@ -210,8 +212,8 @@ While connected:
 
 - **Rotate** to change volume — it stays in sync with the phone's slider.
 - **Hold** to leave Bluetooth and go back to the menu.
-- **Slide a card in** and you'll be asked whether to switch back to jukebox mode.
-  Click to switch, hold to dismiss, or just pull the card back out.
+- **Slide a disk in** and you'll be asked whether to switch back to jukebox mode.
+  Click to switch, hold to dismiss, or just pull the disk back out.
 - Track title and artist appear on screen when the phone sends them.
 - The Sleep Timer works here too.
 
@@ -227,13 +229,13 @@ a PIN. On your phone or laptop:
 
 You'll get a three-tab web app.
 
-**Tags** — the card library. Add a tag, and while the dialog is open you can just
-slide the card into the slot to fill in its ID automatically. Pick a track,
-optionally set a title, artist, and album art, and save. If you insert a card
+**Tags** — the disk library. Add a tag, and while the dialog is open you can just
+slide the disk into the slot to fill in its ID automatically. Pick a track,
+optionally set a title, artist, and album art, and save. If you insert a disk
 that's already registered, it tells you instead of letting you create a
 duplicate.
 
-**Music** — everything on the card, with size, duration, and embedded metadata.
+**Music** — everything on the SD card, with size, duration, and embedded metadata.
 
 - **Upload** WAV, MP3, M4A, AAC, OGG, or FLAC. Anything that isn't already a WAV
   gets converted in your browser before it uploads, so the device only ever
@@ -242,7 +244,7 @@ duplicate.
   artwork, it's cropped, resized, and uploaded automatically, ready to pick in the
   tag editor.
 - **Edit titles and artists** directly. For files uploaded through this app the
-  change is instant. For files you copied onto the card by hand, the first edit
+  change is instant. For files you copied onto the SD card by hand, the first edit
   rewrites the file and can take up to a minute for a long track — the device
   shows a progress bar.
 - **Delete** a track, and any tags pointing at it are removed too (you'll see the
