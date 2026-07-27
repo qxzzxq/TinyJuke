@@ -29,7 +29,8 @@ TREE = f"{REPO}/tree/main"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "site")
 
-ASSET_EXT = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".pdf"}
+ASSET_EXT = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".avif", ".pdf",
+             ".mp4", ".webm", ".mov", ".m4v"}
 
 
 @dataclass(frozen=True)
@@ -61,7 +62,7 @@ def slugify(text, separator="-"):
 
 def rewrite_link(target, src_dir, assets):
     """Map one Markdown link target onto something the built site can serve."""
-    if re.match(r"^(https?:|mailto:|#)", target):
+    if re.match(r"^(https?:|mailto:|data:|//|#)", target):
         return target
 
     path, sep, frag = target.partition("#")
@@ -222,7 +223,8 @@ th, td { border: 1px solid var(--line); padding: .45rem .7rem; text-align: left;
 th { background: var(--surface); font-weight: 620; }
 
 hr { border: 0; border-top: 1px solid var(--line); margin: 2.2rem 0; }
-img { max-width: 100%; height: auto; }
+img { max-width: 100%; height: auto; border-radius: 8px; display: block; margin: 1.2rem 0; }
+video { max-width: 100%; height: auto; border-radius: 8px; display: block; margin: 1.2rem 0; }
 footer {
   margin-top: 3.5rem; padding-top: 1.1rem; border-top: 1px solid var(--line);
   color: var(--muted); font-size: .85rem;
@@ -264,10 +266,12 @@ def build():
             body = md.reset().convert(f.read())
 
         src_dir = os.path.dirname(page.src)
+        # src= matters as much as href=: images embedded from docs/img/ are
+        # relative to the Markdown file, not to the site root.
         body = re.sub(
-            r'href="([^"]*)"',
-            lambda m: 'href="%s"' % html.escape(
-                rewrite_link(html.unescape(m.group(1)), src_dir, assets), quote=True),
+            r'\b(href|src)="([^"]*)"',
+            lambda m: '%s="%s"' % (m.group(1), html.escape(
+                rewrite_link(html.unescape(m.group(2)), src_dir, assets), quote=True)),
             body,
         )
         body = body.replace("<table>", '<div class="table-scroll"><table>')

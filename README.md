@@ -1,15 +1,17 @@
 # TinyJuke
 
-![](docs/img/tinyjuke.jpg)
+![Two TinyJuke boxes, a red one and a purple one, in white 3D-printed shells with perforated speaker grilles, a card slot, a small screen and a knob](docs/img/tinyjuke.jpg)
 
-A little music box you control with physical objects. Put a tagged object on top
-and its song plays. Lift it off and the music stops. Swap it for another and the
-next song starts.
+Your little one plays the same song over and over? Regular speakers too fiddly for
+small hands? This little music box has you covered.
 
-Each song is linked to an NFC tag sticker, and the stickers get embedded in
-3D-printed objects themed around the music they trigger. There are no menus to
-browse and nothing to read, which is the point — it works for someone who can't
-read yet.
+Slide a card into the slot and its song plays. Pull it out and the music stops.
+Swap it for another and the next song starts. That's the whole interface — a fun,
+intuitive way for kids to put on their own music.
+
+Each song is linked to an NFC sticker on a 3D-printed floppy disk (yes I am that old), themed
+around the music it triggers. There are no menus to browse and nothing to read,
+which is the point: it works for someone who can't read yet. Or even better, you can write the song name on the disk to teach them reading!
 
 TinyJuke is an ESP32 project. It runs on a custom mainboard designed for it, but
 any ESP32-WROVER board will do. You'll need to build the hardware and flash the
@@ -19,8 +21,12 @@ firmware yourself.
 
 ## What it does
 
-- **Tag on, music plays.** Tag off, music stops. Same tag left on repeats the
-  track.
+![Inserting a card into the slot: the screen goes from "insert a tag" to album art, then the knob adjusts volume](docs/img/demo-insert.webp)
+
+*(silent — [same clip with sound](docs/img/demo-insert.mp4))*
+
+- **Card in, music plays.** Card out, music stops. Leave it in and the track
+  repeats.
 - **A single knob** for everything: rotate for volume, click to confirm, hold to
   open the menu.
 - **A 2" screen** showing album art, title, and artist.
@@ -36,6 +42,8 @@ Everything lives on a microSD card. Nothing is uploaded anywhere.
 
 ## What you need
 
+![Two finished TinyJuke boxes stacked, one red and one purple, in white 3D-printed shells](docs/img/tinyjuke-stacked.jpg)
+
 | Part        | What to get                                        |
 |-------------|----------------------------------------------------|
 | Mainboard   | The TinyJuke PCB — ESP32-WROVER-E N8R8 (8 MB flash, 8 MB PSRAM) |
@@ -44,7 +52,7 @@ Everything lives on a microSD card. Nothing is uploaded anywhere.
 | Display     | 2.0" ST7789V TFT, 240×320                          |
 | Knob        | KY-040 rotary encoder                              |
 | Storage     | microSD card, formatted FAT32                      |
-| Tags        | NTAG213/215/216 stickers, or any ISO14443A card    |
+| Tags        | NTAG213/215/216 stickers — one per card, or any ISO14443A card |
 | Amplifier   | MAX98357A I²S board — **only for a dev-board build** |
 
 The mainboard is a custom PCB built around the ESP32-WROVER-E N8R8 module, and
@@ -79,8 +87,12 @@ and add the MAX98357A breakout. Besides the PN532's HSU switches, the detail
 that's easiest to get wrong is the amplifier's GAIN pin: tie it to GND rather
 than leaving it floating.
 
-**2. Flash the firmware.** Install [PlatformIO](https://platformio.org/), then
-pick the environment for your board:
+**2. Flash the firmware.** Flashing is over the USB-C port on the back.
+
+<!-- ![The back of a TinyJuke, a plain white panel with a USB-C port near one edge](docs/img/tinyjuke-back.jpg) -->
+
+Install [PlatformIO](https://platformio.org/), then pick the environment for
+your board:
 
 ```bash
 # TinyJuke PCB (ESP32-WROVER-E N8R8) — the default, so no -e needed:
@@ -116,14 +128,19 @@ SD error or the device hangs on the NFC reader, check
 
 ### Playing music
 
-Put a tagged object on the reader. Whatever track is linked to that tag starts
-from the beginning, with its album art on screen.
+<!-- ![Close-up of the front panel: perforated speaker grille and the narrow vertical card slot beside the screen](docs/img/tinyjuke-slot.jpg) -->
 
-- Leave the tag on and the track repeats.
-- Swap in a different tag and it switches immediately.
-- Lift the tag off and playback stops.
+The idle screen says **insert a tag**. Slide a card into the slot on the front and
+whatever track is linked to it starts from the beginning, with its album art on
+screen.
+
+- Leave the card in and the track repeats.
+- Swap in a different card and it switches immediately.
+- Pull the card out and playback stops.
 
 ### The knob
+
+<!-- ![The knob on the right-hand side of the front panel](docs/img/tinyjuke-knob.jpg) -->
 
 | Gesture | While playing / waiting     | In a menu                 |
 |---------|-----------------------------|---------------------------|
@@ -142,7 +159,13 @@ change the instant you turn the knob; only the bar is animated.
 
 ### The menu
 
-Hold the knob from the waiting screen to open it.
+Hold the knob from the waiting screen to open it. Here is the whole menu, end to
+end:
+
+<video src="docs/img/demo-menu.mp4" controls muted playsinline preload="metadata" width="640">
+</video>
+
+*If the player doesn't appear, [watch the menu tour directly](docs/img/demo-menu.mp4) (MP4, 72 s).*
 
 | Item               | What it does                                                            |
 |--------------------|-------------------------------------------------------------------------|
@@ -166,11 +189,11 @@ range and the real loudness is volume × max volume (80% volume at 50% max gives
 40%). In Bluetooth mode it's a hard cap instead, and it also limits what the
 phone's own volume slider can do.
 
-**Power Saving** only blanks the screen; the device stays awake and a tag or a
-touch of the knob brings it back.
+**Power Saving** only blanks the screen; the device stays awake, and inserting a
+card or touching the knob brings it back.
 
 **Sleep Timer** shows a countdown on screen while music plays and stops the audio
-when it reaches zero. Lift the tag and put it back to start playing again.
+when it reaches zero. Pull the card out and put it back to start playing again.
 
 ---
 
@@ -184,8 +207,8 @@ While connected:
 
 - **Rotate** to change volume — it stays in sync with the phone's slider.
 - **Hold** to leave Bluetooth and go back to the menu.
-- **Tap a tag** on the reader and you'll be asked whether to switch back to
-  jukebox mode. Click to switch, hold to dismiss, or just lift the tag.
+- **Slide a card in** and you'll be asked whether to switch back to jukebox mode.
+  Click to switch, hold to dismiss, or just pull the card back out.
 - Track title and artist appear on screen when the phone sends them.
 - The Sleep Timer works here too.
 
@@ -201,10 +224,10 @@ a PIN. On your phone or laptop:
 
 You'll get a three-tab web app.
 
-**Tags** — the tag library. Add a tag, and while the dialog is open you can just
-tap the sticker on the device's reader to fill in its ID automatically. Pick a
-track, optionally set a title, artist, and album art, and save. If you tap a
-sticker that's already registered, it tells you instead of letting you create a
+**Tags** — the card library. Add a tag, and while the dialog is open you can just
+slide the card into the slot to fill in its ID automatically. Pick a track,
+optionally set a title, artist, and album art, and save. If you insert a card
+that's already registered, it tells you instead of letting you create a
 duplicate.
 
 **Music** — everything on the card, with size, duration, and embedded metadata.
@@ -260,6 +283,8 @@ or read the Markdown here:
 ---
 
 ## Status
+
+<!-- ![Two TinyJuke boxes side by side on an orange background](docs/img/tinyjuke-pair.jpg) -->
 
 **Milestone 4, in progress.** Working today: tag-triggered playback with hot-swap,
 album art, the encoder GUI with themes and timers, the web app for tags and music,

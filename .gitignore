@@ -60,3 +60,8 @@ docs/v3/*
 
 # Generated docs site (tools/build_docs.py) — built in CI, never committed
 site/
+
+# Camera/phone originals and any frame dumps live here and never ship — only the
+# optimized copies in docs/img/ do. Re-export from raw/ when you need a new
+# version; committing a >100 MB file makes GitHub reject the push outright.
+docs/img/raw/
