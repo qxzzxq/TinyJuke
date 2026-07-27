@@ -2,7 +2,7 @@
 
 ![Two TinyJuke boxes, a red one and a purple one, in white 3D-printed shells with perforated speaker grilles, a disk slot, a small screen and a knob](docs/img/tinyjuke.jpg)
 
-Your little one plays the same song over and over? Regular speakers too fiddly for
+Your little one plays the same song over and over? Regular speakers too complicated for
 small hands? This little music box has you covered.
 
 Slide a disk into the slot and its song plays. Pull it out and the music stops.
@@ -33,10 +33,9 @@ firmware yourself.
   open the menu.
 - **A 2" screen** showing album art, title, and artist.
 - **Bluetooth speaker mode**, so grown-ups can play their own music through it.
-- **A web app for setup.** The device hosts its own WiFi network — connect a
+- **A web app for setup.** The device hosts its own WiFi network, connect a
   phone or laptop, upload music, and link it to tags. No app to install, no
-  account, no internet.
-- **Firmware updates over WiFi**, protected by a PIN shown on the device screen.
+  account. The speaker never connects to the Internet.
 
 Everything lives on a microSD card. Nothing is uploaded anywhere.
 
