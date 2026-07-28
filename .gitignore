@@ -65,3 +65,4 @@ site/
 # optimized copies in docs/img/ do. Re-export from raw/ when you need a new
 # version; committing a >100 MB file makes GitHub reject the push outright.
 docs/img/raw/
+docs/PCB/*
