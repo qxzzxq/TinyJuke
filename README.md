@@ -80,13 +80,12 @@ than the PCB. Wiring diagrams for both pin maps are in the
 ## Getting started
 
 **1. Wire it up.** On the TinyJuke PCB the wiring is already done — plug in the
-display, reader, encoder, and speaker. Set the PN532's DIP switches to HSU mode
+display, reader, encoder, and speaker. Set the PN532's DIP switches to HSU (UART) mode
 and you're ready to flash.
 
-On a dev board, follow the [wiring tables](docs/technical-reference.md#14-wiring)
-and add the MAX98357A breakout. Besides the PN532's HSU switches, the detail
-that's easiest to get wrong is the amplifier's GAIN pin: tie it to GND rather
-than leaving it floating.
+On an ESP32 dev board, follow the [wiring tables](docs/technical-reference.md#14-wiring)
+and add the MAX98357A breakout. The easy thing to get wrong is the PN532: the pin labels for HSU mode are on the back side of the board,
+make sure that TX goes to RX, not TX to TX.
 
 **2. Flash the firmware.** Flashing is over the USB-C port on the back.
 

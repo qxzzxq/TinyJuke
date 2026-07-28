@@ -138,13 +138,31 @@ nothing to wire but the speaker.
 | Vin           | 5V (VUSB)  |
 | GND           | GND        |
 
-Configuration pins on the breakout:
+Configuration pins on the breakout — **on a typical breakout you can leave both
+alone.** They ship wired for 9 dB and a stereo-average mix, which is what
+TinyJuke wants.
 
-- **GAIN** → tie to GND for 12 dB, and control volume in software. Do not leave
-  it floating: it is a high-impedance input, so noise can select a random gain
-  at power-up.
-- **SD / Mode** → leave floating for an (L+R)/2 mono mix, or tie to GND for
-  left-channel only.
+**GAIN** selects the amplifier's fixed gain. Every option is valid; it only
+changes how loud a given sample is, and TinyJuke scales volume in software on
+top of it (with a Max Volume ceiling), so pick whatever suits your speaker.
+
+| GAIN pin        | Gain            |
+|-----------------|-----------------|
+| 100 kΩ to GND   | 15 dB           |
+| Direct to GND   | 12 dB           |
+| Unconnected     | 9 dB (default)  |
+| Direct to Vin   | 6 dB            |
+| 100 kΩ to Vin   | 3 dB            |
+
+**SD / Mode** is shutdown *and* channel select, driven by the voltage on the
+pin — so **do not tie it to GND, that shuts the amplifier off**. Breakouts' default setting is usually the stereo-average band.
+
+| SD voltage      | Output              |
+|-----------------|---------------------|
+| < 0.16 V        | **Shutdown**        |
+| 0.16 – 0.77 V   | (L + R) / 2         |
+| 0.77 – 1.4 V    | Right channel       |
+| > 1.4 V         | Left channel        |
 
 #### TFT display (SPI, on-board TFT port)
 
