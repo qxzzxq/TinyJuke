@@ -10,10 +10,10 @@ Swap it for another and the next song starts. That's the whole interface — a f
 intuitive way for kids to put on their own music.
 
 Each song is linked to an NFC sticker on a 3D-printed floppy disk (yes, I am that
-old) — a real one shrunk to 75% — themed around the music it triggers. There are
-no menus to browse and nothing to read, which is the point: it works for someone
-who can't read yet. Or better still, write the song name on the disk and it
-starts teaching them to read!
+old), themed around the music it triggers. There are no menus to browse and
+nothing to read, which is the point: it works for someone who can't read yet. Or
+better still, write the song name on the disk and it starts teaching them to
+read!
 
 TinyJuke is an ESP32 project. It runs on a custom mainboard designed for it, but
 any ESP32-WROVER board will do. You'll need to build the hardware and flash the
@@ -288,12 +288,8 @@ or read the Markdown here:
 
 <!-- ![Two TinyJuke boxes side by side on an orange background](docs/img/tinyjuke-pair.jpg) -->
 
-**Milestone 4, in progress.** Working today: tag-triggered playback with hot-swap,
-album art, the encoder GUI with themes and timers, the web app for tags and music,
-Bluetooth speaker mode, and over-the-air firmware updates.
-
-Recent additions include web-based music management (edit metadata, delete with
-tag cascade), OTA updates from the System tab, and a max-volume ceiling.
+The source code is released. I'm still working on the PCB documentation (Gerbers, BOM, etc.) and
+TinyJuke's 3D model — both coming soon :D
 
 ---
 
