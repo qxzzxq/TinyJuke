@@ -280,7 +280,7 @@ or read the Markdown here:
 | [docs/technical-reference.md](docs/technical-reference.md) | Wiring, pin maps, SD card format, build profiles, HTTP API, troubleshooting |
 | [docs/esp32_wrover_e_pin_map.md](docs/esp32_wrover_e_pin_map.md) | Pin allocation for the custom WROVER-E mainboard |
 | [CLAUDE.md](CLAUDE.md) | Firmware architecture, design decisions, and contributor workflow |
-| [TinyJuke_mainboard_v2_1-P1_2026-06-11.png](docs/TinyJuke_mainboard_v2_1-P1_2026-06-11.png) | Schematic of the TinyJuke PCB |
+| [TinyJuke_schematic.png](docs/TinyJuke_schematic.png) | Schematic of the TinyJuke PCB |
 
 ---
 
