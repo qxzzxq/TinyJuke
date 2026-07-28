@@ -310,7 +310,7 @@ void drawSDErrorScreen() {
 //  Menu screen
 // ================================================================
 
-static const char *MENU_ITEMS[] = { "Web Management", "Bluetooth Mode", "Volume", "Brightness", "Color Theme", "Power Saving", "Sleep Timer", "Version", "Reboot" };
+static const char *MENU_ITEMS[] = { "Web Management", "Bluetooth Mode", "Volume", "Brightness", "Color Theme", "Power Saving", "Sleep Timer", "About", "Reboot" };
 
 // 9 items at MENU_ITEM_H=28 fit in 44..(44+9*28)=296, leaving room for the hint bar.
 static const int MENU_START_Y = 44, MENU_ITEM_H = 28;
@@ -899,6 +899,9 @@ static_assert(sizeof(RELEASE_URL) - 1 <= QR_CAPACITY,
               "RELEASE_URL exceeds the QR capacity and would overflow the "
               "encoder buffer at runtime — raise QR_VERSION, re-derive "
               "QR_CAPACITY, and re-check the symbol still fits the screen");
+static_assert(sizeof(PROJECT_URL) - 1 <= QR_CAPACITY,
+              "PROJECT_URL exceeds the QR capacity and would overflow the "
+              "encoder buffer at runtime — see the RELEASE_URL note above");
 
 // Render a QR for `text` into the given box.
 //
@@ -932,9 +935,50 @@ static void drawQrCode(const char *text, int boxX, int boxY, int boxW, int boxH)
   }
 }
 
-void drawVersionScreen() {
-  drawHeader("Version", "back");
+// ================================================================
+//  About screen (paged)
+// ================================================================
+//
+// Two pages, iOS-style dots at the bottom, encoder rotation flips between
+// them. Both pages carry a QR at the same 4 px/module scale — page 1 points at
+// the latest release, page 2 at the project itself. The two vertical budgets
+// are tight and deliberate: the QR band on each page is sized so qrPlace()
+// lands on scale 4 exactly (41 modules incl. quiet zone x 4 = 164 px), because
+// dropping to scale 3 would shrink the symbol by a quarter for no gain.
 
+// Dots sit in the free band between the caption line (..279) and the hint bar
+// (305..), clear of the hold indicator at 315..318.
+static void drawPageDots(int count, int active, int y) {
+  const int r = 3, pitch = 14;
+  const int cx0 = (gfx.width() - (count - 1) * pitch) / 2;
+  for (int i = 0; i < count; i++)
+    gfx.fillCircle(cx0 + i * pitch, y, r, i == active ? C_ACCENT : C_DIM);
+}
+
+// "made with <3 by qxzzxq", with the heart in C_RED.
+//
+// 0x03 is the heart in the classic CP437 glyph table that Arduino_GFX ships as
+// its default font; write() passes every byte except \n and \r straight to
+// drawChar(), so it renders without any UTF-8 involvement. (This is why it is
+// safe here even though AVRCP metadata is ASCII-filtered — that filter exists
+// to reject multi-byte sequences, not the CP437 upper/control range.)
+// Split across two lines because the whole phrase at size 2 is 252 px wide on
+// a 240 px panel.
+static void drawCreditLines(int16_t y) {
+  const char *lead = "made with ";
+  gfx.setTextSize(2);
+
+  int16_t w = textWidth(lead) + textWidth("\x03");
+  gfx.setCursor((gfx.width() - w) / 2, y);
+  gfx.setTextColor(C_TEXT);
+  gfx.print(lead);
+  gfx.setTextColor(C_RED);
+  gfx.print("\x03");
+
+  centerText("by " AUTHOR_HANDLE, y + 22, C_TEXT, 2);
+}
+
+static void drawAboutVersionPage() {
   const char *mode =
 #ifdef DEV_MODE
       "dev";
@@ -945,11 +989,28 @@ void drawVersionScreen() {
   centerText(VERSION_STRING, 44, C_TEXT, 3);
   centerText(mode, 74, C_ACCENT, 2);
 
-  // Free band between the mode line and the caption.
-  drawQrCode(RELEASE_URL, 0, 96, gfx.width(), 168);
+  // 96..268: 172 px of band centres a 164 px symbol at y=100.
+  drawQrCode(RELEASE_URL, 0, 96, gfx.width(), 172);
   centerText("scan for latest release", 272, C_MUTED, 1);
+}
 
-  drawHintBar("click or hold to return");
+static void drawAboutProjectPage() {
+  drawCreditLines(48);
+
+  centerText("check out the project on GitHub", 94, C_MUTED, 1);
+  // 104..268: exactly 164 px, so the symbol fills the band at scale 4.
+  drawQrCode(PROJECT_URL, 0, 104, gfx.width(), 164);
+  centerText(PROJECT_URL_SHORT, 272, C_MUTED, 1);
+}
+
+void drawAboutScreen(int page) {
+  drawHeader("About", "back");
+
+  if (page == 0) drawAboutVersionPage();
+  else           drawAboutProjectPage();
+
+  drawPageDots(ABOUT_PAGES, page, 289);
+  drawHintBar("turn for more - click to return");
 }
 
 // ================================================================

@@ -21,7 +21,7 @@ enum class Screen {
   THEME,
   POWERSAVING,
   SLEEPTIMER,
-  VERSION,
+  ABOUT,
   WEB,
   REBOOT,
   BLUETOOTH,
@@ -36,7 +36,7 @@ static constexpr int MI_BRIGHTNESS  = 3;
 static constexpr int MI_THEME       = 4;
 static constexpr int MI_POWERSAVING = 5;
 static constexpr int MI_SLEEPTIMER  = 6;
-static constexpr int MI_VERSION     = 7;
+static constexpr int MI_ABOUT       = 7;
 static constexpr int MI_REBOOT      = 8;
 
 static Screen    scr        = Screen::MENU;
@@ -45,6 +45,7 @@ static int       menuSel    = 0;
 static bool      webRunning = false;
 static bool      btRunning  = false;
 static bool      volAdjMax  = false;  // Volume screen: encoder adjusts max volume
+static int       aboutPage  = 0;      // About screen: which page the dots show
 static int       btVolDrawn = -1;
 static bool      btConnDrawn = false;
 
@@ -105,8 +106,8 @@ static void redraw() {
     case Screen::SLEEPTIMER:
       drawSleepTimerScreen(sleepTimerMinutes);
       break;
-    case Screen::VERSION:
-      drawVersionScreen();
+    case Screen::ABOUT:
+      drawAboutScreen(aboutPage);
       break;
     case Screen::WEB:
       drawWebServerScreen(getWebConnectionCount());
@@ -278,8 +279,8 @@ void guiLoop() {
         saveSleepTimer();
         scr = Screen::MENU; menuSel = MI_SLEEPTIMER;
         break;
-      case Screen::VERSION:
-        scr = Screen::MENU; menuSel = MI_VERSION;
+      case Screen::ABOUT:
+        scr = Screen::MENU; menuSel = MI_ABOUT;
         break;
       case Screen::WEB:
         stopWebServer();
@@ -338,7 +339,7 @@ void guiLoop() {
           case MI_THEME:       scr = Screen::THEME; break;
           case MI_POWERSAVING: scr = Screen::POWERSAVING; break;
           case MI_SLEEPTIMER:  scr = Screen::SLEEPTIMER; break;
-          case MI_VERSION:     scr = Screen::VERSION; break;
+          case MI_ABOUT:       scr = Screen::ABOUT; aboutPage = 0; break;
           case MI_REBOOT:      scr = Screen::REBOOT; break;
         }
         redraw();
@@ -527,13 +528,33 @@ void guiLoop() {
       break;
     }
 
-    // ================ VERSION ================
-    case Screen::VERSION:
-      if (ev == ENC_CLICK) {
-        scr = Screen::MENU; menuSel = MI_VERSION;
-        redraw();
+    // ================ ABOUT ================
+    // Rotate flips between the version page and the project page; CLICK/HOLD
+    // returns to the menu. The drain loop has to handle ENC_HOLD itself —
+    // the global hold handler has already run by the time we get here.
+    case Screen::ABOUT: {
+      int oldPage = aboutPage;
+
+      for (;;) {
+        if ((ev > 0 && ev < ENC_CLICK) || ev < 0) {
+          aboutPage = (aboutPage + ev) % ABOUT_PAGES;
+          if (aboutPage < 0) aboutPage += ABOUT_PAGES;
+        } else if (ev == ENC_CLICK || ev == ENC_HOLD) {
+          scr = Screen::MENU; menuSel = MI_ABOUT;
+          redraw();
+          break;
+        }
+        ev = readEncoder();
+        if (ev == ENC_NONE) break;
       }
+
+      // The whole page changes, so there is no incremental update path — same
+      // situation as the theme screen. Guarded on the current screen because a
+      // click can arrive in the same burst as a rotation.
+      if (scr == Screen::ABOUT && aboutPage != oldPage)
+        drawAboutScreen(aboutPage);
       break;
+    }
 
     // ================ WEB (encoder only used for HOLD/CLICK — HTTP serviced above) ================
     case Screen::WEB:

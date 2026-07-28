@@ -1405,6 +1405,41 @@ void test_release_url_fits_with_headroom() {
   TEST_ASSERT_EQUAL_INT(0, qrcode_initText(&qr, buf, TEST_QR_VERSION, ECC_LOW, url));
 }
 
+void test_project_url_fits_with_headroom() {
+  // Page 2 of the About screen encodes the repo root. Same overflow hazard as
+  // RELEASE_URL: initBytes() would write past the buffer rather than fail.
+  const char *url = "https://github.com/qxzzxq/TinyJuke";
+  TEST_ASSERT_TRUE(strlen(url) < TEST_QR_CAPACITY);
+  TEST_ASSERT_TRUE(TEST_QR_CAPACITY - strlen(url) >= 8);   // room to rename
+
+  QRCode qr;
+  uint8_t buf[qrcode_getBufferSize(TEST_QR_VERSION)];
+  TEST_ASSERT_EQUAL_INT(0, qrcode_initText(&qr, buf, TEST_QR_VERSION, ECC_LOW, url));
+}
+
+void test_about_page_qr_bands_both_land_on_scale_four() {
+  // Both About pages must render the symbol at the same 4 px/module scale, and
+  // the page-dot row added at y=289 left very little slack: a band one pixel
+  // short drops to scale 3, shrinking the QR by a quarter on one page only.
+  // These are the literal bands passed by drawAboutVersionPage() and
+  // drawAboutProjectPage().
+  const int W = 240, CAPTION_Y = 272, DOTS_TOP = 289 - 3;
+
+  const QrPlacement page1 = qrPlace(33, 0, 96, W, 172);
+  const QrPlacement page2 = qrPlace(33, 0, 104, W, 164);
+
+  TEST_ASSERT_EQUAL_INT(4, page1.scale);
+  TEST_ASSERT_EQUAL_INT(4, page2.scale);
+  TEST_ASSERT_EQUAL_INT(page1.size, page2.size);   // same symbol size on both
+  TEST_ASSERT_EQUAL_INT(page1.x, page2.x);         // and the same left edge
+
+  // Neither symbol may reach the caption line below it, and the caption in turn
+  // must clear the dots — otherwise the QR's white patch eats the text.
+  TEST_ASSERT_TRUE(page1.y + page1.size <= CAPTION_Y);
+  TEST_ASSERT_TRUE(page2.y + page2.size <= CAPTION_Y);
+  TEST_ASSERT_TRUE(CAPTION_Y + 8 <= DOTS_TOP);     // size-1 text is 8 px tall
+}
+
 void test_qr_symbol_size_matches_the_version_formula() {
   // QR_MODULES in screen.cpp is computed as 4*version+17; the drawing code
   // sizes the whole layout from it, so a mismatch would misplace every module.
@@ -1614,6 +1649,8 @@ int main() {
 
   RUN_TEST(test_qr_capacity_is_the_medium_ecc_figure);
   RUN_TEST(test_release_url_fits_with_headroom);
+  RUN_TEST(test_project_url_fits_with_headroom);
+  RUN_TEST(test_about_page_qr_bands_both_land_on_scale_four);
   RUN_TEST(test_qr_symbol_size_matches_the_version_formula);
   RUN_TEST(test_qr_has_finder_patterns_in_three_corners);
   RUN_TEST(test_qr_place_centres_and_reserves_the_quiet_zone);
