@@ -160,14 +160,12 @@ change the instant you turn the knob; only the bar is animated.
 
 ### The menu
 
-Hold the knob from the waiting screen to open it.
-[Here is the whole menu, end to end](docs/img/demo-menu.mp4) (MP4, 72 s).
+Hold the knob from the waiting screen to open it, then rotate to move down the
+list.
 
-<!-- Inline player hidden: GitHub strips <video> with a relative src, so this
-     renders as nothing in the README. The link above works in both places.
-<video src="docs/img/demo-menu.mp4" controls muted playsinline preload="metadata" width="640">
-</video>
--->
+![Holding the knob opens the menu, then turning it moves the selection down the item list](docs/img/demo-menu.webp)
+
+*(first 10 s, silent — [full 72 s tour with sound](docs/img/demo-menu.mp4))*
 
 
 
