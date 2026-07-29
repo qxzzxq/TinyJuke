@@ -940,11 +940,21 @@ static void drawQrCode(const char *text, int boxX, int boxY, int boxW, int boxH)
 // ================================================================
 //
 // Two pages, iOS-style dots at the bottom, encoder rotation flips between
-// them. Both pages carry a QR at the same 4 px/module scale — page 1 points at
-// the latest release, page 2 at the project itself. The two vertical budgets
-// are tight and deliberate: the QR band on each page is sized so qrPlace()
-// lands on scale 4 exactly (41 modules incl. quiet zone x 4 = 164 px), because
-// dropping to scale 3 would shrink the symbol by a quarter for no gain.
+// them. Page 1 points at the latest release, page 2 at the project itself.
+//
+// Both pages hand drawQrCode() the *same* band (ABOUT_QR_BAND_Y/_H), so the two
+// symbols are pixel-identical in size and position and flipping pages moves
+// only the text around them. The band is sized so qrPlace() lands on scale 4
+// (41 modules incl. quiet zone x 4 = 164 px); a shorter band would silently
+// drop to scale 3 and shrink that page's symbol by a quarter.
+//
+// Each page gets at most two lines of text: one block above the QR and one
+// caption below. An earlier revision also put a caption line directly above
+// page 2's QR, which left just 3 px of background between them — the symbol
+// read as cramped and smaller than page 1's even though both were 164 px.
+static const int ABOUT_QR_BAND_Y = 96;
+static const int ABOUT_QR_BAND_H = 172;
+static const int ABOUT_CAPTION_Y = 272;
 
 // Dots sit in the free band between the caption line (..279) and the hint bar
 // (305..), clear of the hold indicator at 315..318.
@@ -989,18 +999,17 @@ static void drawAboutVersionPage() {
   centerText(VERSION_STRING, 44, C_TEXT, 3);
   centerText(mode, 74, C_ACCENT, 2);
 
-  // 96..268: 172 px of band centres a 164 px symbol at y=100.
-  drawQrCode(RELEASE_URL, 0, 96, gfx.width(), 172);
-  centerText("scan for latest release", 272, C_MUTED, 1);
+  drawQrCode(RELEASE_URL, 0, ABOUT_QR_BAND_Y, gfx.width(), ABOUT_QR_BAND_H);
+  centerText("scan for latest release", ABOUT_CAPTION_Y, C_MUTED, 1);
 }
 
 static void drawAboutProjectPage() {
   drawCreditLines(48);
 
-  centerText("check out the project on GitHub", 94, C_MUTED, 1);
-  // 104..268: exactly 164 px, so the symbol fills the band at scale 4.
-  drawQrCode(PROJECT_URL, 0, 104, gfx.width(), 164);
-  centerText(PROJECT_URL_SHORT, 272, C_MUTED, 1);
+  drawQrCode(PROJECT_URL, 0, ABOUT_QR_BAND_Y, gfx.width(), ABOUT_QR_BAND_H);
+  // Brighter than page 1's caption: this one is the thing to read and type in,
+  // not a hint about what the QR does.
+  centerText(PROJECT_URL_SHORT, ABOUT_CAPTION_Y, C_TEXT, 1);
 }
 
 void drawAboutScreen(int page) {

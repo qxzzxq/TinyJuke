@@ -1417,26 +1417,27 @@ void test_project_url_fits_with_headroom() {
   TEST_ASSERT_EQUAL_INT(0, qrcode_initText(&qr, buf, TEST_QR_VERSION, ECC_LOW, url));
 }
 
-void test_about_page_qr_bands_both_land_on_scale_four() {
-  // Both About pages must render the symbol at the same 4 px/module scale, and
-  // the page-dot row added at y=289 left very little slack: a band one pixel
-  // short drops to scale 3, shrinking the QR by a quarter on one page only.
-  // These are the literal bands passed by drawAboutVersionPage() and
-  // drawAboutProjectPage().
-  const int W = 240, CAPTION_Y = 272, DOTS_TOP = 289 - 3;
+void test_about_qr_band_lands_on_scale_four_with_room_to_breathe() {
+  // Both About pages hand drawQrCode() this one band, so the symbols are
+  // pixel-identical and flipping pages moves only the surrounding text. The
+  // page-dot row at y=289 left little slack: a band one pixel short drops to
+  // scale 3 and shrinks the symbol by a quarter.
+  const int W = 240;
+  const int BAND_Y = 96, BAND_H = 172;    // ABOUT_QR_BAND_Y / _H in screen.cpp
+  const int CAPTION_Y = 272;              // ABOUT_CAPTION_Y
+  const int DOTS_TOP = 289 - 3;           // dot centre y minus radius
+  const int CREDIT_BOTTOM = 70 + 16;      // page 2's lower size-2 credit line
 
-  const QrPlacement page1 = qrPlace(33, 0, 96, W, 172);
-  const QrPlacement page2 = qrPlace(33, 0, 104, W, 164);
+  const QrPlacement p = qrPlace(33, 0, BAND_Y, W, BAND_H);
 
-  TEST_ASSERT_EQUAL_INT(4, page1.scale);
-  TEST_ASSERT_EQUAL_INT(4, page2.scale);
-  TEST_ASSERT_EQUAL_INT(page1.size, page2.size);   // same symbol size on both
-  TEST_ASSERT_EQUAL_INT(page1.x, page2.x);         // and the same left edge
+  TEST_ASSERT_EQUAL_INT(4, p.scale);
+  TEST_ASSERT_EQUAL_INT(164, p.size);
 
-  // Neither symbol may reach the caption line below it, and the caption in turn
-  // must clear the dots — otherwise the QR's white patch eats the text.
-  TEST_ASSERT_TRUE(page1.y + page1.size <= CAPTION_Y);
-  TEST_ASSERT_TRUE(page2.y + page2.size <= CAPTION_Y);
+  // The symbol must clear the text above and below it by a visible margin, not
+  // merely avoid overlapping: an earlier layout left 3 px above page 2's QR and
+  // it read as cramped and smaller than page 1's despite being the same size.
+  TEST_ASSERT_TRUE(p.y - CREDIT_BOTTOM >= 8);
+  TEST_ASSERT_TRUE(CAPTION_Y - (p.y + p.size) >= 8);
   TEST_ASSERT_TRUE(CAPTION_Y + 8 <= DOTS_TOP);     // size-1 text is 8 px tall
 }
 
@@ -1650,7 +1651,7 @@ int main() {
   RUN_TEST(test_qr_capacity_is_the_medium_ecc_figure);
   RUN_TEST(test_release_url_fits_with_headroom);
   RUN_TEST(test_project_url_fits_with_headroom);
-  RUN_TEST(test_about_page_qr_bands_both_land_on_scale_four);
+  RUN_TEST(test_about_qr_band_lands_on_scale_four_with_room_to_breathe);
   RUN_TEST(test_qr_symbol_size_matches_the_version_formula);
   RUN_TEST(test_qr_has_finder_patterns_in_three_corners);
   RUN_TEST(test_qr_place_centres_and_reserves_the_quiet_zone);
