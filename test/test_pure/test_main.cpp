@@ -1405,6 +1405,42 @@ void test_release_url_fits_with_headroom() {
   TEST_ASSERT_EQUAL_INT(0, qrcode_initText(&qr, buf, TEST_QR_VERSION, ECC_LOW, url));
 }
 
+void test_project_url_fits_with_headroom() {
+  // Page 2 of the About screen encodes the repo root. Same overflow hazard as
+  // RELEASE_URL: initBytes() would write past the buffer rather than fail.
+  const char *url = "https://github.com/qxzzxq/TinyJuke";
+  TEST_ASSERT_TRUE(strlen(url) < TEST_QR_CAPACITY);
+  TEST_ASSERT_TRUE(TEST_QR_CAPACITY - strlen(url) >= 8);   // room to rename
+
+  QRCode qr;
+  uint8_t buf[qrcode_getBufferSize(TEST_QR_VERSION)];
+  TEST_ASSERT_EQUAL_INT(0, qrcode_initText(&qr, buf, TEST_QR_VERSION, ECC_LOW, url));
+}
+
+void test_about_qr_band_lands_on_scale_four_with_room_to_breathe() {
+  // Both About pages hand drawQrCode() this one band, so the symbols are
+  // pixel-identical and flipping pages moves only the surrounding text. The
+  // page-dot row at y=289 left little slack: a band one pixel short drops to
+  // scale 3 and shrinks the symbol by a quarter.
+  const int W = 240;
+  const int BAND_Y = 96, BAND_H = 172;    // ABOUT_QR_BAND_Y / _H in screen.cpp
+  const int CAPTION_Y = 272;              // ABOUT_CAPTION_Y
+  const int DOTS_TOP = 289 - 3;           // dot centre y minus radius
+  const int CREDIT_BOTTOM = 70 + 16;      // page 2's lower size-2 credit line
+
+  const QrPlacement p = qrPlace(33, 0, BAND_Y, W, BAND_H);
+
+  TEST_ASSERT_EQUAL_INT(4, p.scale);
+  TEST_ASSERT_EQUAL_INT(164, p.size);
+
+  // The symbol must clear the text above and below it by a visible margin, not
+  // merely avoid overlapping: an earlier layout left 3 px above page 2's QR and
+  // it read as cramped and smaller than page 1's despite being the same size.
+  TEST_ASSERT_TRUE(p.y - CREDIT_BOTTOM >= 8);
+  TEST_ASSERT_TRUE(CAPTION_Y - (p.y + p.size) >= 8);
+  TEST_ASSERT_TRUE(CAPTION_Y + 8 <= DOTS_TOP);     // size-1 text is 8 px tall
+}
+
 void test_qr_symbol_size_matches_the_version_formula() {
   // QR_MODULES in screen.cpp is computed as 4*version+17; the drawing code
   // sizes the whole layout from it, so a mismatch would misplace every module.
@@ -1614,6 +1650,8 @@ int main() {
 
   RUN_TEST(test_qr_capacity_is_the_medium_ecc_figure);
   RUN_TEST(test_release_url_fits_with_headroom);
+  RUN_TEST(test_project_url_fits_with_headroom);
+  RUN_TEST(test_about_qr_band_lands_on_scale_four_with_room_to_breathe);
   RUN_TEST(test_qr_symbol_size_matches_the_version_formula);
   RUN_TEST(test_qr_has_finder_patterns_in_three_corners);
   RUN_TEST(test_qr_place_centres_and_reserves_the_quiet_zone);

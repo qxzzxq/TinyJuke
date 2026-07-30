@@ -353,7 +353,7 @@ covered and needs on-target verification.
 | Arduino_GFX       | `moononournation/Arduino_GFX.git`     | TFT display (ST7789)       |
 | ArduinoJson       | `bblanchon/ArduinoJson @ ^7`          | Parse `/tags.json`         |
 | ESP32-A2DP        | `pschatzmann/ESP32-A2DP.git#v1.8.11`  | Bluetooth A2DP sink        |
-| QRCode            | `ricmoo/QRCode @ ^0.0.1`              | Version-screen release QR  |
+| QRCode            | `ricmoo/QRCode @ ^0.0.1`              | About-screen release + project QRs |
 | PN532 + PN532_HSU | Bundled in `lib/`                     | NFC reader                 |
 | SD                | Built-in (arduino-esp32)              | SD card access over SPI    |
 | WiFi + WebServer  | Built-in (arduino-esp32)              | AP mode + REST API         |

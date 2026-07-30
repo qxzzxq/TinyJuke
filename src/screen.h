@@ -22,7 +22,7 @@ void drawVolumeScreen(int level, int maxLevel, bool adjustingMax);
 void drawBrightnessScreen(int level);
 void drawPowerSaveScreen(int minutes);
 void drawSleepTimerScreen(int minutes);
-void drawVersionScreen();
+void drawAboutScreen(int page);   // page 0 = version, 1 = project credits
 void drawThemeScreen(int index);
 void drawWebServerScreen(int connections);
 void drawRebootConfirmScreen();

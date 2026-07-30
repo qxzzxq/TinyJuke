@@ -177,7 +177,7 @@ list.
 | **Color Theme**    | Select different color theme                                            |
 | **Power Saving**   | Turn the screen off after idling — Off / 5 / 15 / 30 / 60 min           |
 | **Sleep Timer**    | Stop the music after a while — Off / 15 / 30 / 60 / 120 min             |
-| **Version**        | Firmware version, plus a QR code linking to the latest release          |
+| **About**          | Two pages — turn to flip. Firmware version + a QR to the latest release, then the project credits + a QR to the GitHub repo |
 | **Reboot**         | Restarts the device (hold to confirm, click or rotate to cancel)        |
 
 Web Management and Bluetooth Mode can't run at the same time, so choosing one

@@ -114,18 +114,27 @@
   #define SLEEP_OPTIONS     5
 #endif
 
-// --- Version ---
-#define VERSION_STRING       "v1.11.0"
+// --- Version / About ---
+#define VERSION_STRING       "v1.12.0"
 
-// Shown as a QR code on the Version screen. Points at /releases/latest rather
-// than a specific tag, so the code stays correct as new versions ship and the
-// device never has to be online to know what the newest release is.
+// Shown as a QR code on page 1 of the About screen. Points at /releases/latest
+// rather than a specific tag, so the code stays correct as new versions ship and
+// the device never has to be online to know what the newest release is.
 // Length is capped by the QR version chosen in screen.cpp — see the
 // static_assert there if this changes.
 #define RELEASE_URL          "https://github.com/qxzzxq/TinyJuke/releases/latest"
 
+// Shown as a QR code on page 2 of the About screen, alongside the credit line.
+// Same length cap as RELEASE_URL — both are asserted against QR_CAPACITY.
+#define PROJECT_URL          "https://github.com/qxzzxq/TinyJuke"
+#define PROJECT_URL_SHORT    "github.com/qxzzxq/TinyJuke"
+#define AUTHOR_HANDLE        "qxzzxq"
+
 // --- Menu ---
 #define MENU_ITEM_COUNT      9
+
+// Pages on the About screen (version / project credits), flipped by rotation.
+#define ABOUT_PAGES          2
 
 // --- NFC polling / tag-presence policy ---
 // Poll periods and the removal-confirmation windows live in tag_presence.h,
